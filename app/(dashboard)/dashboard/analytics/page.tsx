@@ -188,13 +188,13 @@ export default function AnalyticsPage() {
         <p className="text-muted-foreground">Your productivity insights</p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="border-border/50">
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm text-muted-foreground">Total Commits</p>
-                <p className="text-3xl font-bold mt-1">{data.totalCommits}</p>
+                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.totalCommits}</p>
               </div>
               <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
                 <GitCommitHorizontal className="h-6 w-6 text-primary" />
@@ -203,11 +203,11 @@ export default function AnalyticsPage() {
           </CardContent>
         </Card>
         <Card className="border-border/50">
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm text-muted-foreground">Coding Hours</p>
-                <p className="text-3xl font-bold mt-1">{data.totalHours}h</p>
+                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.totalHours}h</p>
               </div>
               <div className="h-12 w-12 rounded-lg bg-emerald-500/10 flex items-center justify-center">
                 <Clock className="h-6 w-6 text-emerald-500" />
@@ -216,11 +216,11 @@ export default function AnalyticsPage() {
           </CardContent>
         </Card>
         <Card className="border-border/50">
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm text-muted-foreground">Current Streak</p>
-                <p className="text-3xl font-bold mt-1">{data.currentStreak} <span className="text-base font-normal text-muted-foreground">days</span></p>
+                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.currentStreak} <span className="text-base font-normal text-muted-foreground">days</span></p>
               </div>
               <div className="h-12 w-12 rounded-lg bg-orange-500/10 flex items-center justify-center">
                 <Flame className="h-6 w-6 text-orange-500" />
@@ -229,11 +229,11 @@ export default function AnalyticsPage() {
           </CardContent>
         </Card>
         <Card className="border-border/50">
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm text-muted-foreground">Avg Daily Commits</p>
-                <p className="text-3xl font-bold mt-1">{data.avgDailyCommits}</p>
+                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.avgDailyCommits}</p>
               </div>
               <div className="h-12 w-12 rounded-lg bg-blue-500/10 flex items-center justify-center">
                 <TrendingUp className="h-6 w-6 text-blue-500" />
@@ -244,45 +244,49 @@ export default function AnalyticsPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="border-border/50">
+        <Card className="overflow-hidden border-border/50">
           <CardHeader>
             <CardTitle className="text-base">Commit Activity</CardTitle>
             <CardDescription>Daily commits over the last 30 days</CardDescription>
           </CardHeader>
           <CardContent>
-            <ChartContainer config={commitChartConfig} className="h-[280px] w-full">
-              <AreaChart data={data.commitTrend}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
-                <XAxis dataKey="date" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} interval={6} />
-                <YAxis className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} allowDecimals={false} />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <Area type="monotone" dataKey="commits" stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.1} strokeWidth={2} />
-              </AreaChart>
-            </ChartContainer>
+            <div className="-mx-2 overflow-x-auto pb-2 sm:mx-0">
+              <ChartContainer config={commitChartConfig} className="h-[240px] min-w-[620px] sm:h-[280px] sm:min-w-0">
+                <AreaChart data={data.commitTrend} margin={{ left: 0, right: 12 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+                  <XAxis dataKey="date" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} interval={6} />
+                  <YAxis className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} allowDecimals={false} width={32} />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <Area type="monotone" dataKey="commits" stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.1} strokeWidth={2} />
+                </AreaChart>
+              </ChartContainer>
+            </div>
           </CardContent>
         </Card>
 
-        <Card className="border-border/50">
+        <Card className="overflow-hidden border-border/50">
           <CardHeader>
             <CardTitle className="text-base">Coding Hours</CardTitle>
             <CardDescription>Estimated hours per day</CardDescription>
           </CardHeader>
           <CardContent>
-            <ChartContainer config={hoursChartConfig} className="h-[280px] w-full">
-              <BarChart data={data.hoursTrend}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
-                <XAxis dataKey="date" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} interval={6} />
-                <YAxis className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} allowDecimals={false} />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <Bar dataKey="hours" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ChartContainer>
+            <div className="-mx-2 overflow-x-auto pb-2 sm:mx-0">
+              <ChartContainer config={hoursChartConfig} className="h-[240px] min-w-[620px] sm:h-[280px] sm:min-w-0">
+                <BarChart data={data.hoursTrend} margin={{ left: 0, right: 12 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+                  <XAxis dataKey="date" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} interval={6} />
+                  <YAxis className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} allowDecimals={false} width={32} />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <Bar dataKey="hours" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ChartContainer>
+            </div>
           </CardContent>
         </Card>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="border-border/50">
+        <Card className="overflow-hidden border-border/50">
           <CardHeader>
             <CardTitle className="text-base">Repository Breakdown</CardTitle>
             <CardDescription>Commits per repository</CardDescription>
@@ -291,53 +295,57 @@ export default function AnalyticsPage() {
             {data.repoBreakdown.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-8">No repository data yet</p>
             ) : (
-              <ChartContainer config={repoChartConfig} className="h-[250px] w-full">
-                <BarChart data={data.repoBreakdown} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" horizontal={false} />
-                  <XAxis type="number" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} allowDecimals={false} />
-                  <YAxis type="category" dataKey="repo" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} width={100} />
-                  <ChartTooltip content={<ChartTooltipContent />} />
-                  <Bar dataKey="count" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ChartContainer>
+              <div className="-mx-2 overflow-x-auto pb-2 sm:mx-0">
+                <ChartContainer config={repoChartConfig} className="h-[250px] min-w-[520px] sm:min-w-0">
+                  <BarChart data={data.repoBreakdown} layout="vertical" margin={{ left: 0, right: 12 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" horizontal={false} />
+                    <XAxis type="number" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} allowDecimals={false} />
+                    <YAxis type="category" dataKey="repo" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} width={100} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Bar dataKey="count" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ChartContainer>
+              </div>
             )}
           </CardContent>
         </Card>
 
-        <Card className="border-border/50">
+        <Card className="overflow-hidden border-border/50">
           <CardHeader>
             <CardTitle className="text-base">Commit Heatmap</CardTitle>
             <CardDescription>Activity by day and hour</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-1">
-              <div className="flex items-center gap-1 pl-8">
-                {Array.from({ length: 12 }, (_, i) => (
-                  <span key={i} className="text-[9px] text-muted-foreground w-6 text-center">{i * 2}</span>
+            <div className="-mx-2 overflow-x-auto pb-2 sm:mx-0">
+              <div className="min-w-[680px] space-y-1">
+                <div className="flex items-center gap-1 pl-8">
+                  {Array.from({ length: 12 }, (_, i) => (
+                    <span key={i} className="w-6 text-center text-[9px] text-muted-foreground">{i * 2}</span>
+                  ))}
+                </div>
+                {DAYS.map((day, dayIdx) => (
+                  <div key={day} className="flex items-center gap-1">
+                    <span className="w-7 text-[9px] text-muted-foreground">{day}</span>
+                    <div className="flex gap-0.5">
+                      {Array.from({ length: 24 }, (_, hour) => {
+                        const entry = data.heatmapData.find((d) => d.day === dayIdx && d.hour === hour);
+                        const intensity = entry ? entry.value / maxHeatmap : 0;
+                        return (
+                          <div
+                            key={hour}
+                            className="h-4 w-6 rounded-sm"
+                            style={{
+                              backgroundColor: intensity > 0
+                                ? `rgba(59, 130, 246, ${0.2 + intensity * 0.8})`
+                                : 'hsl(var(--secondary))',
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
                 ))}
               </div>
-              {DAYS.map((day, dayIdx) => (
-                <div key={day} className="flex items-center gap-1">
-                  <span className="text-[9px] text-muted-foreground w-7">{day}</span>
-                  <div className="flex gap-0.5">
-                    {Array.from({ length: 24 }, (_, hour) => {
-                      const entry = data.heatmapData.find((d) => d.day === dayIdx && d.hour === hour);
-                      const intensity = entry ? entry.value / maxHeatmap : 0;
-                      return (
-                        <div
-                          key={hour}
-                          className="w-6 h-4 rounded-sm"
-                          style={{
-                            backgroundColor: intensity > 0
-                              ? `rgba(59, 130, 246, ${0.2 + intensity * 0.8})`
-                              : 'hsl(var(--secondary))',
-                          }}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
             </div>
           </CardContent>
         </Card>
@@ -349,7 +357,7 @@ export default function AnalyticsPage() {
           <CardDescription>Longest streak: {data.longestStreak} days</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             <div className="text-center">
               <p className="text-3xl font-bold text-orange-500">{data.currentStreak}</p>
               <p className="text-xs text-muted-foreground">Current</p>
