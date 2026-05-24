@@ -243,7 +243,7 @@ export default function DashboardPage() {
             <CardDescription>Commits and tasks completed this week</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="-mx-2 overflow-x-auto pb-2 sm:mx-0">
+            <div className="scrollbar-chart -mx-2 overflow-x-auto pb-3 sm:mx-0">
               <ChartContainer config={weeklyChartConfig} className="h-[220px] min-w-[520px] sm:h-[250px] sm:min-w-0">
                 <AreaChart data={data.weeklyData} margin={{ left: 0, right: 12 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
@@ -264,7 +264,7 @@ export default function DashboardPage() {
             <CardDescription>Estimated hours per day</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="-mx-2 overflow-x-auto pb-2 sm:mx-0">
+            <div className="scrollbar-chart -mx-2 overflow-x-auto pb-3 sm:mx-0">
               <ChartContainer config={sessionChartConfig} className="h-[220px] min-w-[520px] sm:h-[250px] sm:min-w-0">
                 <BarChart data={data.sessionData} margin={{ left: 0, right: 12 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />

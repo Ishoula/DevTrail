@@ -250,7 +250,7 @@ export default function AnalyticsPage() {
             <CardDescription>Daily commits over the last 30 days</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="-mx-2 overflow-x-auto pb-2 sm:mx-0">
+            <div className="scrollbar-chart -mx-2 overflow-x-auto pb-3 sm:mx-0">
               <ChartContainer config={commitChartConfig} className="h-[240px] min-w-[620px] sm:h-[280px] sm:min-w-0">
                 <AreaChart data={data.commitTrend} margin={{ left: 0, right: 12 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
@@ -270,7 +270,7 @@ export default function AnalyticsPage() {
             <CardDescription>Estimated hours per day</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="-mx-2 overflow-x-auto pb-2 sm:mx-0">
+            <div className="scrollbar-chart -mx-2 overflow-x-auto pb-3 sm:mx-0">
               <ChartContainer config={hoursChartConfig} className="h-[240px] min-w-[620px] sm:h-[280px] sm:min-w-0">
                 <BarChart data={data.hoursTrend} margin={{ left: 0, right: 12 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
@@ -295,7 +295,7 @@ export default function AnalyticsPage() {
             {data.repoBreakdown.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-8">No repository data yet</p>
             ) : (
-              <div className="-mx-2 overflow-x-auto pb-2 sm:mx-0">
+              <div className="scrollbar-chart -mx-2 overflow-x-auto pb-3 sm:mx-0">
                 <ChartContainer config={repoChartConfig} className="h-[250px] min-w-[520px] sm:min-w-0">
                   <BarChart data={data.repoBreakdown} layout="vertical" margin={{ left: 0, right: 12 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" horizontal={false} />
@@ -316,7 +316,7 @@ export default function AnalyticsPage() {
             <CardDescription>Activity by day and hour</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="-mx-2 overflow-x-auto pb-2 sm:mx-0">
+            <div className="scrollbar-chart -mx-2 overflow-x-auto pb-3 sm:mx-0">
               <div className="min-w-[680px] space-y-1">
                 <div className="flex items-center gap-1 pl-8">
                   {Array.from({ length: 12 }, (_, i) => (

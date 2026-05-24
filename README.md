@@ -22,7 +22,7 @@ DevTrack is a developer productivity dashboard for tracking projects, tasks, Git
 - **UI:** Tailwind CSS, shadcn/ui, Radix UI, lucide-react
 - **Charts:** Recharts
 - **Backend:** Supabase Auth, PostgreSQL, Row Level Security, Edge Functions
-- **Deployment:** Netlify-ready configuration
+- **Deployment:** Vercel
 
 ## Getting Started
 
@@ -157,24 +157,15 @@ supabase/
 
 ## Deployment
 
-This repository includes `netlify.toml` with the Netlify Next.js plugin:
-
-```toml
-[build]
-command = "npx next build"
-publish = ".next"
-
-[[plugins]]
-package = "@netlify/plugin-nextjs"
-```
+DevTrack is deployed on Vercel. The app also includes Vercel Speed Insights through `@vercel/speed-insights`.
 
 For deployment:
 
-1. Connect the repository to Netlify.
-2. Add the Supabase environment variables.
+1. Connect the repository to Vercel.
+2. Add the Supabase environment variables in the Vercel project settings.
 3. Apply the Supabase migrations.
-4. Deploy the `github-sync` Edge Function.
-5. Build and deploy the Next.js app.
+4. Deploy the `github-sync` Edge Function with the Supabase CLI.
+5. Let Vercel build and deploy the Next.js app.
 
 ## Development Notes
 

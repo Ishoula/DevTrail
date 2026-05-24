@@ -60,4 +60,33 @@
     background-color: hsl(var(--border));
     border-radius: 3px;
   }
+
+  .scrollbar-chart {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--primary) / 0.65) hsl(var(--secondary) / 0.5);
+  }
+  .scrollbar-chart::-webkit-scrollbar {
+    height: 10px;
+  }
+  .scrollbar-chart::-webkit-scrollbar-track {
+    background: hsl(var(--secondary) / 0.45);
+    border-radius: 999px;
+    margin-inline: 8px;
+  }
+  .scrollbar-chart::-webkit-scrollbar-thumb {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--primary) / 0.95),
+      hsl(var(--chart-2) / 0.85)
+    );
+    border: 2px solid hsl(var(--card));
+    border-radius: 999px;
+  }
+  .scrollbar-chart::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--primary)),
+      hsl(var(--chart-2))
+    );
+  }
 }

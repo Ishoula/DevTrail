@@ -8,6 +8,7 @@ const inter = Inter({ subsets: ['latin'] });
 export const metadata: Metadata = {
   title: 'DevTrack - Developer Productivity Dashboard',
   description: 'Track your development productivity with projects, tasks, and GitHub analytics',
+ 
 };
 
 export default function RootLayout({
