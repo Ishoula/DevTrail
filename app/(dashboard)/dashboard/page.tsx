@@ -177,13 +177,13 @@ export default function DashboardPage() {
         <p className="text-muted-foreground">Welcome back! Here&apos;s your overview.</p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="border-border/50">
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm text-muted-foreground">Productivity Score</p>
-                <p className="text-3xl font-bold mt-1">{data.productivityScore}%</p>
+                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.productivityScore}%</p>
               </div>
               <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
                 <TrendingUp className="h-6 w-6 text-primary" />
@@ -194,11 +194,11 @@ export default function DashboardPage() {
         </Card>
 
         <Card className="border-border/50">
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm text-muted-foreground">Total Commits</p>
-                <p className="text-3xl font-bold mt-1">{data.commitCount}</p>
+                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.commitCount}</p>
               </div>
               <div className="h-12 w-12 rounded-lg bg-emerald-500/10 flex items-center justify-center">
                 <GitCommitHorizontal className="h-6 w-6 text-emerald-500" />
@@ -208,11 +208,11 @@ export default function DashboardPage() {
         </Card>
 
         <Card className="border-border/50">
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm text-muted-foreground">Coding Streak</p>
-                <p className="text-3xl font-bold mt-1">{data.codingStreak} <span className="text-base font-normal text-muted-foreground">days</span></p>
+                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.codingStreak} <span className="text-base font-normal text-muted-foreground">days</span></p>
               </div>
               <div className="h-12 w-12 rounded-lg bg-orange-500/10 flex items-center justify-center">
                 <Flame className="h-6 w-6 text-orange-500" />
@@ -222,11 +222,11 @@ export default function DashboardPage() {
         </Card>
 
         <Card className="border-border/50">
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm text-muted-foreground">Active Projects</p>
-                <p className="text-3xl font-bold mt-1">{data.projectCount}</p>
+                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.projectCount}</p>
               </div>
               <div className="h-12 w-12 rounded-lg bg-blue-500/10 flex items-center justify-center">
                 <FolderKanban className="h-6 w-6 text-blue-500" />
@@ -237,46 +237,50 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-7">
-        <Card className="lg:col-span-4 border-border/50">
+        <Card className="overflow-hidden border-border/50 lg:col-span-4">
           <CardHeader>
             <CardTitle className="text-base">Weekly Activity</CardTitle>
             <CardDescription>Commits and tasks completed this week</CardDescription>
           </CardHeader>
           <CardContent>
-            <ChartContainer config={weeklyChartConfig} className="h-[250px] w-full">
-              <AreaChart data={data.weeklyData}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
-                <XAxis dataKey="day" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                <YAxis className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <Area type="monotone" dataKey="commits" stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.1} strokeWidth={2} />
-                <Area type="monotone" dataKey="tasks" stroke="hsl(var(--chart-2))" fill="hsl(var(--chart-2))" fillOpacity={0.1} strokeWidth={2} />
-              </AreaChart>
-            </ChartContainer>
+            <div className="-mx-2 overflow-x-auto pb-2 sm:mx-0">
+              <ChartContainer config={weeklyChartConfig} className="h-[220px] min-w-[520px] sm:h-[250px] sm:min-w-0">
+                <AreaChart data={data.weeklyData} margin={{ left: 0, right: 12 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+                  <XAxis dataKey="day" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
+                  <YAxis className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} width={32} />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <Area type="monotone" dataKey="commits" stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.1} strokeWidth={2} />
+                  <Area type="monotone" dataKey="tasks" stroke="hsl(var(--chart-2))" fill="hsl(var(--chart-2))" fillOpacity={0.1} strokeWidth={2} />
+                </AreaChart>
+              </ChartContainer>
+            </div>
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-3 border-border/50">
+        <Card className="overflow-hidden border-border/50 lg:col-span-3">
           <CardHeader>
             <CardTitle className="text-base">Coding Hours</CardTitle>
             <CardDescription>Estimated hours per day</CardDescription>
           </CardHeader>
           <CardContent>
-            <ChartContainer config={sessionChartConfig} className="h-[250px] w-full">
-              <BarChart data={data.sessionData}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
-                <XAxis dataKey="day" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                <YAxis className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <Bar dataKey="hours" fill="hsl(var(--chart-3))" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ChartContainer>
+            <div className="-mx-2 overflow-x-auto pb-2 sm:mx-0">
+              <ChartContainer config={sessionChartConfig} className="h-[220px] min-w-[520px] sm:h-[250px] sm:min-w-0">
+                <BarChart data={data.sessionData} margin={{ left: 0, right: 12 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+                  <XAxis dataKey="day" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
+                  <YAxis className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} width={32} />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <Bar dataKey="hours" fill="hsl(var(--chart-3))" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ChartContainer>
+            </div>
           </CardContent>
         </Card>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-7">
-        <Card className="lg:col-span-4 border-border/50">
+        <Card className="border-border/50 lg:col-span-4">
           <CardHeader>
             <CardTitle className="text-base">Task Summary</CardTitle>
             <CardDescription>Current task distribution</CardDescription>
@@ -304,7 +308,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-3 border-border/50">
+        <Card className="border-border/50 lg:col-span-3">
           <CardHeader>
             <CardTitle className="text-base">Recent Activity</CardTitle>
             <CardDescription>Latest updates</CardDescription>
