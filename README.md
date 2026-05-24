@@ -1,19 +1,19 @@
 # DevTrack
 
-DevTrack is a developer productivity dashboard built with Next.js, Supabase, TypeScript, Tailwind CSS, and shadcn/ui. It helps users manage projects and tasks, sync GitHub contribution activity, and review productivity metrics from a protected dashboard.
-
-> Note: the public homepage at `/` is currently styled and branded as a `bydrive` car-rental landing page. The authenticated app experience is branded as DevTrack.
+DevTrack is a developer productivity dashboard for tracking projects, tasks, GitHub contribution activity, coding sessions, and weekly momentum. It ships with a public landing page, Supabase-backed authentication, protected dashboard routes, Kanban task management, analytics, and GitHub sync through a Supabase Edge Function.
 
 ## Features
 
-- Supabase email/password authentication
-- Protected dashboard routes
+- Public DevTrack homepage with calls to sign in or create an account
+- Supabase email and password authentication
+- Protected dashboard shell with sidebar and topbar navigation
 - Project management with create, edit, archive, and delete flows
-- Kanban-style task board with project, priority, status, and due-date fields
+- Kanban task board with project, priority, status, and due-date fields
 - GitHub Personal Access Token sync through a Supabase Edge Function
-- Productivity analytics for commits, coding hours, streaks, repository activity, and heatmaps
-- User profile, notification, password, and GitHub settings
-- Dark UI built with Tailwind CSS and shadcn/ui components
+- Productivity dashboard for commits, coding streaks, tasks, and coding hours
+- Analytics views for contribution and productivity trends
+- Profile, notification, password, and GitHub integration settings
+- Dark UI built with Tailwind CSS, shadcn/ui, Radix UI, and lucide-react
 
 ## Tech Stack
 
@@ -31,7 +31,7 @@ DevTrack is a developer productivity dashboard built with Next.js, Supabase, Typ
 - Node.js 18 or newer
 - npm
 - A Supabase project
-- Optional: Supabase CLI for local migration/function workflows
+- Optional: Supabase CLI for local migration and Edge Function workflows
 
 ### Install
 
@@ -60,7 +60,7 @@ Open `http://localhost:3000`.
 
 ## Supabase Setup
 
-Apply the SQL migrations in order from the `supabase/migrations` directory:
+Apply the SQL migrations in order from `supabase/migrations`:
 
 1. `20260508093739_001_create_profiles_and_otp_tables.sql`
 2. `20260508093807_002_create_projects_tasks_commits_sessions_notifications.sql`
@@ -75,11 +75,11 @@ These migrations create:
 - `coding_sessions`
 - `notifications`
 
-They also enable Row Level Security and create ownership policies so users can only access their own data.
+They also enable Row Level Security and create ownership policies so each user can only access their own data.
 
-## GitHub Sync Edge Function
+## GitHub Sync
 
-The project includes one Supabase Edge Function:
+DevTrack includes one Supabase Edge Function:
 
 ```text
 supabase/functions/github-sync/index.ts
@@ -99,7 +99,7 @@ Deploy it with the Supabase CLI:
 supabase functions deploy github-sync
 ```
 
-The function expects Supabase-provided runtime secrets:
+The function expects these Supabase runtime secrets:
 
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY` or `SUPABASE_PUBLISHABLE_KEY`
@@ -121,11 +121,14 @@ npm run typecheck
 
 ```text
 app/
-  (auth)/                 Auth pages
-  (dashboard)/            Protected dashboard shell and pages
-  page.tsx                Public landing page
+  (auth)/                 Login, register, OTP, and password reset pages
+  (dashboard)/            Protected dashboard layout and dashboard pages
+  globals.css             Global Tailwind styles and theme tokens
+  layout.tsx              Root app layout and metadata
+  page.tsx                Public DevTrack homepage
+  providers.tsx           App providers
 components/
-  dashboard/              Sidebar and topbar
+  dashboard/              Sidebar and topbar components
   ui/                     shadcn/ui component set
 hooks/
   use-toast.ts            Toast hook
@@ -134,7 +137,7 @@ lib/
   supabase.ts             Supabase client and database types
   utils.ts                Shared utilities
 supabase/
-  functions/github-sync/  GitHub contribution sync function
+  functions/github-sync/  GitHub contribution sync Edge Function
   migrations/             Database schema and RLS policies
 ```
 
@@ -143,9 +146,10 @@ supabase/
 - `/` - Public landing page
 - `/login` - Sign in
 - `/register` - Create account
+- `/verify-otp` - Verify one-time password
 - `/forgot-password` - Request password reset
 - `/reset-password` - Set a new password
-- `/dashboard` - Overview metrics and activity
+- `/dashboard` - Overview metrics and recent activity
 - `/dashboard/projects` - Project management
 - `/dashboard/tasks` - Kanban task board
 - `/dashboard/analytics` - Productivity charts
@@ -175,6 +179,7 @@ For deployment:
 ## Development Notes
 
 - Authentication uses Supabase email/password auth.
+- Dashboard routes redirect unauthenticated users to `/login`.
 - Password reset uses `supabase.auth.resetPasswordForEmail()` and redirects back to `/reset-password`.
 - GitHub tokens are currently saved in Supabase user metadata from the client. For production, move token storage to a server-controlled encrypted secret flow.
 - Some dashboard metrics depend on synced GitHub data, so a new account may show empty charts until GitHub sync runs.
