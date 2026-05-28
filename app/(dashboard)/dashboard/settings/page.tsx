@@ -3,12 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase';
-
-import {
-  FunctionsFetchError,
-  FunctionsHttpError,
-  FunctionsRelayError,
-} from '@supabase/supabase-js';
+import { useSearchParams } from 'next/navigation';
 
 import {
   Card,
@@ -19,50 +14,12 @@ import {
 } from '@/components/ui/card';
 
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Separator } from '@/components/ui/separator';
-
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-
-import {
-  Github,
-  Bell,
-  User,
-  Key,
-  CircleCheck as CheckCircle2,
-  ExternalLink,
-  Trash2,
-} from 'lucide-react';
+import { Github, User, Key, Bell } from 'lucide-react';
 
 // =========================
 // TYPES
 // =========================
-interface Profile {
-  name: string;
-  avatar_url: string;
-  theme: string;
-}
-
-interface Notification {
-  id: string;
-  type: string;
-  title: string;
-  message: string;
-  read: boolean;
-  created_at: string;
-}
-
 interface HeatmapDay {
   date: string;
   count: number;
@@ -70,159 +27,70 @@ interface HeatmapDay {
 
 interface GitHubSyncResponse {
   success?: boolean;
-
-  github_user?: string;
-
   streak?: number;
   total_contributions?: number;
-  heatmap?: HeatmapDay[];
-
   commits_synced?: number;
   repos_synced?: number;
-
-  stats?: {
-    push_events: number;
-    total_events: number;
-  };
-
+  heatmap?: HeatmapDay[];
   error?: string;
 }
 
-// =========================
-// ERROR HELPERS
-// =========================
-function getFunctionsHttpErrorMessage(body: unknown, status: number) {
-  if (typeof body === 'string') return body.trim() || `HTTP ${status}`;
-
-  if (body && typeof body === 'object') {
-    const record = body as Record<string, unknown>;
-    return (
-      (record.error as string) ||
-      (record.message as string) ||
-      JSON.stringify(body) ||
-      `HTTP ${status}`
-    );
-  }
-
-  return `Function HTTP error (${status})`;
-}
-
-function normalizeGitHubSyncResponse(
-  data: GitHubSyncResponse | string | null | undefined
-): GitHubSyncResponse | null {
-  if (!data) return null;
-
-  if (typeof data === 'string') {
-    try {
-      return JSON.parse(data);
-    } catch {
-      return null;
-    }
-  }
-
-  return data;
-}
-
-// =========================
-// COMPONENT
-// =========================
 export default function SettingsPage() {
   const { user } = useAuth();
+  const searchParams = useSearchParams();
 
-  const [profile, setProfile] = useState<Profile>({
-    name: '',
-    avatar_url: '',
-    theme: 'dark',
-  });
-
-  const [githubToken, setGithubToken] = useState('');
+  const [githubToken, setGithubToken] = useState<string>('');
   const [githubConnected, setGithubConnected] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
-
   const [heatmap, setHeatmap] = useState<HeatmapDay[]>([]);
 
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
-  const [newPassword, setNewPassword] = useState('');
-  const [passwordError, setPasswordError] = useState('');
-
   // =========================
-  // INIT
+  // GITHUB OAUTH HANDLER
   // =========================
   useEffect(() => {
-    if (!user) return;
+    const token = searchParams.get('github_token');
 
-    const fetchProfile = async () => {
-      const { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .maybeSingle();
+    if (!token) return;
 
-      if (data) {
-        setProfile({
-          name: data.name || '',
-          avatar_url: data.avatar_url || '',
-          theme: data.theme || 'dark',
-        });
-      }
-    };
+    setGithubToken(token);
+    setGithubConnected(true);
 
-    const fetchNotifications = async () => {
-      const { data } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(20);
-
-      setNotifications(data || []);
-    };
-
-    fetchProfile();
-    fetchNotifications();
-
-    const token = user.user_metadata?.github_token;
-    if (token) {
-      setGithubToken(token);
-      setGithubConnected(true);
-    }
-  }, [user]);
+    // auto-sync immediately after OAuth redirect
+    syncGitHub(token);
+  }, [searchParams]);
 
   // =========================
-  // GITHUB SYNC
+  // OAUTH URL
   // =========================
-  const handleGithubConnect = async () => {
-    if (!user || !githubToken.trim()) return;
+  const githubOAuthUrl = `https://github.com/login/oauth/authorize?client_id=${process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID}&scope=read:user repo`;
+
+  // =========================
+  // SYNC FUNCTION
+  // =========================
+  const syncGitHub = async (tokenOverride?: string) => {
+    const token = tokenOverride || githubToken;
+    if (!user || !token) return;
 
     setSyncing(true);
     setSyncResult(null);
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData.session?.access_token;
+      const { data: session } = await supabase.auth.getSession();
 
+      const accessToken = session.session?.access_token;
       if (!accessToken) {
-        setSyncResult('Session missing. Please re-login.');
+        setSyncResult('No session found');
         setSyncing(false);
         return;
       }
-
-      await supabase.auth.updateUser({
-        data: { github_token: githubToken },
-      });
 
       const { data, error } = await supabase.functions.invoke<GitHubSyncResponse>(
         'github-sync',
         {
           body: {
             user_id: user.id,
-            github_token: githubToken,
+            github_token: token,
           },
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -230,68 +98,29 @@ export default function SettingsPage() {
         }
       );
 
-      const syncData = normalizeGitHubSyncResponse(data);
-
       if (error) {
-        const errMsg =
-          error instanceof Error ? error.message : 'GitHub sync failed';
-        setSyncResult(errMsg);
+        setSyncResult(error.message);
         setSyncing(false);
         return;
       }
 
-      if (syncData?.success) {
+      if (data?.success) {
         setGithubConnected(true);
-
-        setHeatmap(syncData.heatmap ?? []);
-
-        const commits = syncData.commits_synced ?? 0;
-        const repos = syncData.repos_synced ?? 0;
-        const streak = syncData.streak ?? 0;
-        const total = syncData.total_contributions ?? 0;
+        setHeatmap(data.heatmap ?? []);
 
         setSyncResult(
-          `Synced ${commits} commits, ${repos} repos • 🔥 ${streak} day streak • ⭐ ${total} contributions`
+          `🔥 ${data.streak ?? 0} day streak • ⭐ ${
+            data.total_contributions ?? 0
+          } contributions • 📦 ${data.repos_synced ?? 0} repos`
         );
-
-        await supabase.from('notifications').insert({
-          user_id: user.id,
-          type: 'github',
-          title: 'GitHub synced',
-          message: `Synced ${commits} commits`,
-        });
       } else {
-        setSyncResult(syncData?.error || 'Sync failed');
+        setSyncResult(data?.error || 'Sync failed');
       }
     } catch (err) {
-      setSyncResult('Unexpected error during sync');
+      setSyncResult('Unexpected error occurred');
     } finally {
       setSyncing(false);
     }
-  };
-
-  // =========================
-  // PROFILE SAVE
-  // =========================
-  const handleSaveProfile = async () => {
-    if (!user) return;
-
-    setSaving(true);
-
-    await supabase
-      .from('profiles')
-      .update({
-        name: profile.name,
-        avatar_url: profile.avatar_url,
-        theme: profile.theme,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', user.id);
-
-    setSaving(false);
-    setSaved(true);
-
-    setTimeout(() => setSaved(false), 2000);
   };
 
   // =========================
@@ -301,25 +130,20 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Settings</h1>
 
-      <Tabs defaultValue="profile" className="space-y-6">
+      <Tabs defaultValue="github">
         <TabsList>
           <TabsTrigger value="profile">
-            <User className="h-4 w-4 mr-2" />
+            <User className="w-4 h-4 mr-2" />
             Profile
           </TabsTrigger>
 
           <TabsTrigger value="github">
-            <Github className="h-4 w-4 mr-2" />
+            <Github className="w-4 h-4 mr-2" />
             GitHub
           </TabsTrigger>
 
-          <TabsTrigger value="notifications">
-            <Bell className="h-4 w-4 mr-2" />
-            Notifications
-          </TabsTrigger>
-
           <TabsTrigger value="security">
-            <Key className="h-4 w-4 mr-2" />
+            <Key className="w-4 h-4 mr-2" />
             Security
           </TabsTrigger>
         </TabsList>
@@ -329,30 +153,8 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Profile</CardTitle>
-              <CardDescription>Update your details</CardDescription>
+              <CardDescription>Manage your info</CardDescription>
             </CardHeader>
-
-            <CardContent className="space-y-4">
-              <Input
-                value={profile.name}
-                onChange={(e) =>
-                  setProfile({ ...profile, name: e.target.value })
-                }
-                placeholder="Name"
-              />
-
-              <Input
-                value={profile.avatar_url}
-                onChange={(e) =>
-                  setProfile({ ...profile, avatar_url: e.target.value })
-                }
-                placeholder="Avatar URL"
-              />
-
-              <Button onClick={handleSaveProfile} disabled={saving}>
-                {saved ? 'Saved' : saving ? 'Saving...' : 'Save'}
-              </Button>
-            </CardContent>
           </Card>
         </TabsContent>
 
@@ -362,60 +164,52 @@ export default function SettingsPage() {
             <CardHeader>
               <CardTitle>GitHub Integration</CardTitle>
               <CardDescription>
-                Sync commits, repos, heatmap & streak
+                OAuth connection + live sync
               </CardDescription>
             </CardHeader>
 
             <CardContent className="space-y-4">
-              <Input
-                type="password"
-                value={githubToken}
-                onChange={(e) => setGithubToken(e.target.value)}
-                placeholder="GitHub token"
-              />
 
-              <Button
-                onClick={handleGithubConnect}
-                disabled={syncing || !githubToken}
-              >
-                {syncing ? 'Syncing...' : 'Sync GitHub'}
+              {/* CONNECT BUTTON */}
+              <Button asChild>
+                <a href={githubOAuthUrl}>
+                  <Github className="w-4 h-4 mr-2" />
+                  Connect GitHub
+                </a>
               </Button>
 
+              {/* MANUAL SYNC */}
+              <Button
+                variant="outline"
+                disabled={syncing || !githubToken}
+                onClick={() => syncGitHub()}
+              >
+                {syncing ? 'Syncing...' : 'Sync Data'}
+              </Button>
+
+              {/* STATUS */}
+              <div className="flex items-center gap-2 text-sm">
+                <div
+                  className={`w-2 h-2 rounded-full ${
+                    githubConnected ? 'bg-green-500' : 'bg-gray-400'
+                  }`}
+                />
+                {githubConnected ? 'Connected' : 'Not connected'}
+              </div>
+
+              {/* RESULT */}
               {syncResult && (
                 <p className="text-sm text-muted-foreground">
                   {syncResult}
                 </p>
               )}
 
-              {/* HEATMAP PREVIEW */}
+              {/* HEATMAP STATUS */}
               {heatmap.length > 0 && (
-                <div className="mt-4">
-                  <p className="text-sm font-medium mb-2">Heatmap loaded</p>
-                  <p className="text-xs text-muted-foreground">
-                    {heatmap.length} active days
-                  </p>
-                </div>
+                <p className="text-xs text-muted-foreground">
+                  Heatmap loaded: {heatmap.length} active days
+                </p>
               )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ================= NOTIFICATIONS ================= */}
-        <TabsContent value="notifications">
-          <Card>
-            <CardHeader>
-              <CardTitle>Notifications</CardTitle>
-            </CardHeader>
-
-            <CardContent>
-              {notifications.map((n) => (
-                <div key={n.id} className="border-b py-2">
-                  <p className="font-medium">{n.title}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {n.message}
-                  </p>
-                </div>
-              ))}
             </CardContent>
           </Card>
         </TabsContent>
@@ -429,7 +223,7 @@ export default function SettingsPage() {
 
             <CardContent>
               <p className="text-sm text-muted-foreground">
-                Email: {user?.email}
+                OAuth authentication enabled via GitHub
               </p>
             </CardContent>
           </Card>
