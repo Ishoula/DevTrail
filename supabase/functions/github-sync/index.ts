@@ -30,23 +30,6 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-type GitHubContributionDay = {
-  date: string;
-  contributionCount: number;
-};
-
-function getContributionDateRange() {
-  const to = new Date();
-  const from = new Date(to);
-
-  from.setUTCFullYear(from.getUTCFullYear() - 1);
-
-  return {
-    from: from.toISOString(),
-    to: to.toISOString(),
-  };
-}
-
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, {
@@ -128,149 +111,86 @@ Deno.serve(async (req: Request) => {
     const githubUser = JSON.parse(githubUserText);
 
     // =========================
-    // GITHUB CONTRIBUTIONS FETCH
+    // GITHUB EVENTS FETCH
     // =========================
-    const { from, to } = getContributionDateRange();
-    const contributionsRes = await fetch("https://api.github.com/graphql", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${github_token}`,
-        "User-Agent": "DevTrack",
-        Accept: "application/vnd.github+json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        query: `
-          query Contributions($login: String!, $from: DateTime!, $to: DateTime!) {
-            user(login: $login) {
-              contributionsCollection(from: $from, to: $to) {
-                contributionCalendar {
-                  totalContributions
-                  weeks {
-                    contributionDays {
-                      date
-                      contributionCount
-                    }
-                  }
-                }
-              }
-            }
-          }
-        `,
-        variables: {
-          login: githubUser.login,
-          from,
-          to,
+    const eventsRes = await fetch(
+      `https://api.github.com/users/${githubUser.login}/events?per_page=100`,
+      {
+        headers: {
+          Authorization: `Bearer ${github_token}`,
+          "User-Agent": "DevTrack",
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
         },
-      }),
-    });
+      }
+    );
 
-    const contributionsText = await contributionsRes.text();
+    const eventsText = await eventsRes.text();
 
-    if (!contributionsRes.ok) {
-      console.error("GITHUB CONTRIBUTIONS ERROR STATUS:", contributionsRes.status);
-      console.error("GITHUB CONTRIBUTIONS ERROR BODY:", contributionsText);
+    if (!eventsRes.ok) {
+      console.error("GITHUB EVENTS ERROR STATUS:", eventsRes.status);
+      console.error("GITHUB EVENTS ERROR BODY:", eventsText);
 
       return jsonResponse(
         {
-          error: "Failed to fetch GitHub contributions",
-          status: contributionsRes.status,
-          details: contributionsText,
+          error: "Failed to fetch GitHub events",
+          status: eventsRes.status,
+          details: eventsText,
         },
         400
       );
     }
 
-    const contributionsPayload = JSON.parse(contributionsText);
+    const events = JSON.parse(eventsText);
 
-    if (Array.isArray(contributionsPayload.errors)) {
-      console.error("GITHUB CONTRIBUTIONS GRAPHQL ERRORS:", contributionsPayload.errors);
-
+    if (!Array.isArray(events)) {
       return jsonResponse(
         {
-          error: "Failed to fetch GitHub contributions",
-          details: contributionsPayload.errors,
+          error: "Invalid GitHub events response",
+          details: events,
         },
         400
       );
     }
-
-    const contributionCalendar =
-      contributionsPayload.data?.user?.contributionsCollection?.contributionCalendar;
-
-    if (!contributionCalendar) {
-      return jsonResponse(
-        {
-          error: "Invalid GitHub contributions response",
-          details: contributionsPayload,
-        },
-        400
-      );
-    }
-
-    const contributionDays: GitHubContributionDay[] =
-      contributionCalendar?.weeks?.flatMap((week: any) => week.contributionDays ?? []) ?? [];
 
     console.log("GitHub user:", githubUser.login);
-    console.log("Contribution days:", contributionDays.length);
-    console.log("Total contributions:", contributionCalendar?.totalContributions ?? 0);
+    console.log("Total events:", events.length);
 
     // =========================
-    // CONTRIBUTIONS
+    // PUSH EVENTS
     // =========================
-    const contributions = contributionDays.flatMap((day) => {
-      if (day.contributionCount <= 0) return [];
+    const pushEvents = events.filter(
+      (e: any) => e.type === "PushEvent"
+    );
 
-      return Array.from({ length: day.contributionCount }, (_, index) => ({
+    console.log("Push events:", pushEvents.length);
+
+    // =========================
+    // COMMITS
+    // =========================
+    const commits = pushEvents.flatMap((event: any) => {
+      const commitsArray = event.payload?.commits;
+
+      if (!Array.isArray(commitsArray)) return [];
+
+      return commitsArray.map((commit: any) => ({
         user_id: userId,
-        sha: `github-contribution:${githubUser.login}:${day.date}:${index + 1}`,
-        message: "GitHub contribution",
-        repository: "GitHub contributions",
-        committed_at: `${day.date}T12:00:00.000Z`,
+        sha: commit.sha,
+        message: commit.message,
+        repository: event.repo?.name || "unknown",
+        committed_at: event.created_at,
         additions: 0,
         deletions: 0,
       }));
     });
 
-    console.log("Contributions extracted:", contributions.length);
+    console.log("Commits extracted:", commits.length);
 
     // =========================
-    // INSERT CONTRIBUTIONS
+    // INSERT COMMITS
     // =========================
-    const encodedUserId = encodeURIComponent(userId);
-
-    const deleteExistingContributionsRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/commits?user_id=eq.${encodedUserId}&repository=eq.GitHub%20contributions`,
-      {
-        method: "DELETE",
-        headers: {
-          apikey: SUPABASE_SERVICE_KEY,
-          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-        },
-      }
-    );
-
-    if (!deleteExistingContributionsRes.ok) {
-      const deleteExistingContributionsText =
-        await deleteExistingContributionsRes.text();
-
-      console.error(
-        "DELETE EXISTING CONTRIBUTIONS ERROR:",
-        deleteExistingContributionsText
-      );
-
-      return jsonResponse(
-        {
-          error: "Failed to refresh existing GitHub contributions",
-          status: deleteExistingContributionsRes.status,
-          details: deleteExistingContributionsText,
-        },
-        400
-      );
-    }
-
-    if (contributions.length > 0) {
-      const insertContributionsRes = await fetch(`${SUPABASE_URL}/rest/v1/commits`, {
+    if (commits.length > 0) {
+      await fetch(`${SUPABASE_URL}/rest/v1/commits`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -278,23 +198,8 @@ Deno.serve(async (req: Request) => {
           Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
           Prefer: "resolution=merge-duplicates",
         },
-        body: JSON.stringify(contributions),
+        body: JSON.stringify(commits),
       });
-
-      if (!insertContributionsRes.ok) {
-        const insertContributionsText = await insertContributionsRes.text();
-
-        console.error("INSERT CONTRIBUTIONS ERROR:", insertContributionsText);
-
-        return jsonResponse(
-          {
-            error: "Failed to save GitHub contributions",
-            status: insertContributionsRes.status,
-            details: insertContributionsText,
-          },
-          400
-        );
-      }
     }
 
     // =========================
@@ -303,10 +208,9 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({
       success: true,
       github_user: githubUser.login,
-      contribution_days: contributionDays.length,
-      total_contributions: contributionCalendar.totalContributions,
-      contributions_synced: contributions.length,
-      commits_synced: contributions.length,
+      total_events: events.length,
+      push_events: pushEvents.length,
+      commits_synced: commits.length,
       sessions_created: 0,
     });
   } catch (err) {
