@@ -15,7 +15,7 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Github, User, Key, Bell } from 'lucide-react';
+import { Github, User, Key } from 'lucide-react';
 
 // =========================
 // TYPES
@@ -37,28 +37,12 @@ interface GitHubSyncResponse {
 
 export default function SettingsPage() {
   const { user } = useAuth();
-  const searchParams = useSearchParams();
 
-  const [githubToken, setGithubToken] = useState<string>('');
+  const [githubToken, setGithubToken] = useState('');
   const [githubConnected, setGithubConnected] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [heatmap, setHeatmap] = useState<HeatmapDay[]>([]);
-
-  // =========================
-  // GITHUB OAUTH HANDLER
-  // =========================
-  useEffect(() => {
-    const token = searchParams.get('github_token');
-
-    if (!token) return;
-
-    setGithubToken(token);
-    setGithubConnected(true);
-
-    // auto-sync immediately after OAuth redirect
-    syncGitHub(token);
-  }, [searchParams]);
 
   // =========================
   // OAUTH URL
@@ -66,10 +50,30 @@ export default function SettingsPage() {
   const githubOAuthUrl = `https://github.com/login/oauth/authorize?client_id=${process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID}&scope=read:user repo`;
 
   // =========================
+  // LOAD GITHUB CONNECTION (SOURCE OF TRUTH = SUPABASE USER)
+  // =========================
+  useEffect(() => {
+    if (!user) return;
+
+    const token = user.user_metadata?.github_token;
+
+    if (token) {
+      setGithubToken(token);
+      setGithubConnected(true);
+
+      // optional: auto sync on load
+      syncGitHub(token);
+    } else {
+      setGithubConnected(false);
+    }
+  }, [user]);
+
+  // =========================
   // SYNC FUNCTION
   // =========================
   const syncGitHub = async (tokenOverride?: string) => {
     const token = tokenOverride || githubToken;
+
     if (!user || !token) return;
 
     setSyncing(true);
@@ -77,8 +81,8 @@ export default function SettingsPage() {
 
     try {
       const { data: session } = await supabase.auth.getSession();
-
       const accessToken = session.session?.access_token;
+
       if (!accessToken) {
         setSyncResult('No session found');
         setSyncing(false);
@@ -105,7 +109,6 @@ export default function SettingsPage() {
       }
 
       if (data?.success) {
-        setGithubConnected(true);
         setHeatmap(data.heatmap ?? []);
 
         setSyncResult(
@@ -116,7 +119,7 @@ export default function SettingsPage() {
       } else {
         setSyncResult(data?.error || 'Sync failed');
       }
-    } catch (err) {
+    } catch {
       setSyncResult('Unexpected error occurred');
     } finally {
       setSyncing(false);
@@ -153,7 +156,9 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Profile</CardTitle>
-              <CardDescription>Manage your info</CardDescription>
+              <CardDescription>
+                Manage your personal information
+              </CardDescription>
             </CardHeader>
           </Card>
         </TabsContent>
@@ -164,38 +169,38 @@ export default function SettingsPage() {
             <CardHeader>
               <CardTitle>GitHub Integration</CardTitle>
               <CardDescription>
-                OAuth connection + live sync
+                Connect GitHub to track commits, repos, and streaks
               </CardDescription>
             </CardHeader>
 
             <CardContent className="space-y-4">
 
-              {/* CONNECT BUTTON */}
-              <Button asChild>
-                <a href={githubOAuthUrl}>
-                  <Github className="w-4 h-4 mr-2" />
-                  Connect GitHub
-                </a>
-              </Button>
-
-              {/* MANUAL SYNC */}
-              <Button
-                variant="outline"
-                disabled={syncing || !githubToken}
-                onClick={() => syncGitHub()}
-              >
-                {syncing ? 'Syncing...' : 'Sync Data'}
-              </Button>
-
               {/* STATUS */}
               <div className="flex items-center gap-2 text-sm">
                 <div
-                  className={`w-2 h-2 rounded-full ${
+                  className={`h-2 w-2 rounded-full ${
                     githubConnected ? 'bg-green-500' : 'bg-gray-400'
                   }`}
                 />
                 {githubConnected ? 'Connected' : 'Not connected'}
               </div>
+
+              {/* CONNECT BUTTON */}
+              <Button asChild>
+                <a href={githubOAuthUrl}>
+                  <Github className="w-4 h-4 mr-2" />
+                  {githubConnected ? 'Reconnect GitHub' : 'Connect GitHub'}
+                </a>
+              </Button>
+
+              {/* SYNC BUTTON */}
+              <Button
+                variant="outline"
+                onClick={() => syncGitHub()}
+                disabled={syncing || !githubToken}
+              >
+                {syncing ? 'Syncing...' : 'Sync Data'}
+              </Button>
 
               {/* RESULT */}
               {syncResult && (
@@ -204,7 +209,7 @@ export default function SettingsPage() {
                 </p>
               )}
 
-              {/* HEATMAP STATUS */}
+              {/* HEATMAP INFO */}
               {heatmap.length > 0 && (
                 <p className="text-xs text-muted-foreground">
                   Heatmap loaded: {heatmap.length} active days
@@ -219,13 +224,10 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Security</CardTitle>
+              <CardDescription>
+                OAuth-based authentication via GitHub
+              </CardDescription>
             </CardHeader>
-
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                OAuth authentication enabled via GitHub
-              </p>
-            </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
