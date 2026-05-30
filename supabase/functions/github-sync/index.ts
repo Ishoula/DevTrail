@@ -1,15 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const Deno = (globalThis as typeof globalThis & {
-  Deno: {
-    env: {
-      get(key: string): string | undefined;
-    };
-    serve(
-      handler: (req: Request) => Response | Promise<Response>,
-    ): void;
-  };
-}).Deno;
+const Deno = (globalThis as any).Deno;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -18,45 +9,109 @@ const corsHeaders = {
     "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-const jsonHeaders = {
-  ...corsHeaders,
-  "Content-Type": "application/json; charset=utf-8",
-};
-
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: jsonHeaders,
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json",
+    },
   });
 }
 
+// =========================
+// GITHUB GRAPHQL (HEATMAP)
+// =========================
+async function getContributions(username: string, token: string) {
+  const query = `
+    query {
+      user(login: "${username}") {
+        contributionsCollection {
+          contributionCalendar {
+            totalContributions
+            weeks {
+              contributionDays {
+                date
+                contributionCount
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const res = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ query }),
+  });
+
+  const data = await res.json();
+  return data.data.user.contributionsCollection.contributionCalendar;
+}
+
+// =========================
+// FLATTEN HEATMAP
+// =========================
+function formatHeatmap(calendar: any) {
+  return calendar.weeks.flatMap((week: any) =>
+    week.contributionDays.map((day: any) => ({
+      date: day.date,
+      count: day.contributionCount,
+    }))
+  );
+}
+
+// =========================
+// STREAK CALCULATION
+// =========================
+function calculateStreak(calendar: any) {
+  const days = calendar.weeks.flatMap(
+    (w: any) => w.contributionDays
+  );
+
+  const sorted = [...days].sort(
+    (a: any, b: any) =>
+      new Date(a.date).getTime() - new Date(b.date).getTime()
+  );
+
+  let streak = 0;
+
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    if (sorted[i].contributionCount > 0) {
+      streak++;
+    } else {
+      break;
+    }
+  }
+
+  return streak;
+}
+
+// =========================
+// MAIN FUNCTION
+// =========================
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, {
-      status: 200,
-      headers: corsHeaders,
-    });
+    return new Response(null, { headers: corsHeaders });
   }
 
   try {
     const authHeader = req.headers.get("Authorization");
-
     if (!authHeader) {
       return jsonResponse({ error: "Missing authorization header" }, 401);
     }
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const SUPABASE_ANON_KEY =
-      Deno.env.get("SUPABASE_ANON_KEY") ??
-      Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
+    const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    const SUPABASE_SERVICE_KEY =
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-    const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY!, {
-      global: {
-        headers: { Authorization: authHeader },
-      },
+    const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
     });
 
     const {
@@ -65,17 +120,10 @@ Deno.serve(async (req: Request) => {
     } = await authClient.auth.getUser();
 
     if (userError || !user) {
-      return jsonResponse(
-        {
-          error: "Unauthorized",
-          details: userError instanceof Error ? userError.message : String(userError),
-        },
-        401
-      );
+      return jsonResponse({ error: "Unauthorized" }, 401);
     }
 
     const { github_token } = await req.json();
-
     if (!github_token) {
       return jsonResponse({ error: "Missing GitHub token" }, 400);
     }
@@ -83,94 +131,48 @@ Deno.serve(async (req: Request) => {
     const userId = user.id;
 
     // =========================
-    // GITHUB USER FETCH
+    // GET GITHUB USER
     // =========================
     const githubUserRes = await fetch("https://api.github.com/user", {
       headers: {
         Authorization: `Bearer ${github_token}`,
         "User-Agent": "DevTrack",
         Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
       },
     });
 
-    const githubUserText = await githubUserRes.text();
+    const githubUser = await githubUserRes.json();
 
     if (!githubUserRes.ok) {
-      console.error("GITHUB USER ERROR:", githubUserText);
-
       return jsonResponse(
-        {
-          error: "Invalid GitHub token",
-          details: githubUserText,
-        },
+        { error: "Invalid GitHub token", details: githubUser },
         401
       );
     }
 
-    const githubUser = JSON.parse(githubUserText);
+    const username = githubUser.login;
 
     // =========================
-    // GITHUB EVENTS FETCH
+    // GET EVENTS (COMMITS SOURCE)
     // =========================
     const eventsRes = await fetch(
-      `https://api.github.com/users/${githubUser.login}/events?per_page=100`,
+      `https://api.github.com/users/${username}/events?per_page=100`,
       {
         headers: {
           Authorization: `Bearer ${github_token}`,
           "User-Agent": "DevTrack",
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
         },
       }
     );
 
-    const eventsText = await eventsRes.text();
+    const events = await eventsRes.json();
 
-    if (!eventsRes.ok) {
-      console.error("GITHUB EVENTS ERROR STATUS:", eventsRes.status);
-      console.error("GITHUB EVENTS ERROR BODY:", eventsText);
-
-      return jsonResponse(
-        {
-          error: "Failed to fetch GitHub events",
-          status: eventsRes.status,
-          details: eventsText,
-        },
-        400
-      );
-    }
-
-    const events = JSON.parse(eventsText);
-
-    if (!Array.isArray(events)) {
-      return jsonResponse(
-        {
-          error: "Invalid GitHub events response",
-          details: events,
-        },
-        400
-      );
-    }
-
-    console.log("GitHub user:", githubUser.login);
-    console.log("Total events:", events.length);
-
-    // =========================
-    // PUSH EVENTS
-    // =========================
     const pushEvents = events.filter(
       (e: any) => e.type === "PushEvent"
     );
 
-    console.log("Push events:", pushEvents.length);
-
-    // =========================
-    // COMMITS
-    // =========================
     const commits = pushEvents.flatMap((event: any) => {
       const commitsArray = event.payload?.commits;
-
       if (!Array.isArray(commitsArray)) return [];
 
       return commitsArray.map((commit: any) => ({
@@ -179,26 +181,69 @@ Deno.serve(async (req: Request) => {
         message: commit.message,
         repository: event.repo?.name || "unknown",
         committed_at: event.created_at,
-        additions: 0,
-        deletions: 0,
       }));
     });
 
-    console.log("Commits extracted:", commits.length);
+    // =========================
+    // GET REPOSITORIES
+    // =========================
+    const reposRes = await fetch(
+      `https://api.github.com/users/${username}/repos?per_page=100&sort=updated`,
+      {
+        headers: {
+          Authorization: `Bearer ${github_token}`,
+          "User-Agent": "DevTrack",
+        },
+      }
+    );
+
+    const repos = await reposRes.json();
+
+    const repoRecords = repos.map((repo: any) => ({
+      user_id: userId,
+      repo_id: repo.id,
+      name: repo.name,
+      full_name: repo.full_name,
+      language: repo.language,
+      stars: repo.stargazers_count,
+      forks: repo.forks_count,
+      updated_at: repo.updated_at,
+    }));
+
+    // =========================
+    // GET CONTRIBUTIONS (HEATMAP + STREAK)
+    // =========================
+    const contributions = await getContributions(
+      username,
+      github_token
+    );
+
+    const heatmap = formatHeatmap(contributions);
+    const streak = calculateStreak(contributions);
+
+    // =========================
+    // SUPABASE CLIENT (SERVICE ROLE)
+    // =========================
+    const supabase = createClient(
+      SUPABASE_URL,
+      SUPABASE_SERVICE_KEY
+    );
 
     // =========================
     // INSERT COMMITS
     // =========================
     if (commits.length > 0) {
-      await fetch(`${SUPABASE_URL}/rest/v1/commits`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: SUPABASE_SERVICE_KEY,
-          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-          Prefer: "resolution=merge-duplicates",
-        },
-        body: JSON.stringify(commits),
+      await supabase.from("commits").upsert(commits, {
+        onConflict: "sha",
+      });
+    }
+
+    // =========================
+    // INSERT REPOS
+    // =========================
+    if (repoRecords.length > 0) {
+      await supabase.from("repos").upsert(repoRecords, {
+        onConflict: "repo_id",
       });
     }
 
@@ -207,14 +252,22 @@ Deno.serve(async (req: Request) => {
     // =========================
     return jsonResponse({
       success: true,
-      github_user: githubUser.login,
-      total_events: events.length,
-      push_events: pushEvents.length,
+      github_user: username,
+
+      streak,
+      total_contributions: contributions.totalContributions,
+      heatmap,
+
       commits_synced: commits.length,
-      sessions_created: 0,
+      repos_synced: repoRecords.length,
+
+      stats: {
+        push_events: pushEvents.length,
+        total_events: events.length,
+      },
     });
   } catch (err) {
-    console.error("SERVER ERROR:", err);
+    console.error("SYNC ERROR:", err);
 
     return jsonResponse(
       {
@@ -225,5 +278,3 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
-
-export {};
