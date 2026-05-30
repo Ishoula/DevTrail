@@ -167,9 +167,7 @@ Deno.serve(async (req: Request) => {
 
     const events = await eventsRes.json();
 
-    const pushEvents = events.filter(
-      (e: any) => e.type === "PushEvent"
-    );
+    const pushEvents = events.filter((e: any) => e.type === "PushEvent");
 
     const commits = pushEvents.flatMap((event: any) => {
       const commitsArray = event.payload?.commits;
@@ -213,10 +211,7 @@ Deno.serve(async (req: Request) => {
     // =========================
     // GET CONTRIBUTIONS (HEATMAP + STREAK)
     // =========================
-    const contributions = await getContributions(
-      username,
-      github_token
-    );
+    const contributions = await getContributions(username, github_token);
 
     const heatmap = formatHeatmap(contributions);
     const streak = calculateStreak(contributions);
@@ -244,6 +239,37 @@ Deno.serve(async (req: Request) => {
     if (repoRecords.length > 0) {
       await supabase.from("repos").upsert(repoRecords, {
         onConflict: "repo_id",
+      });
+    }
+
+    // =========================
+    // SAVE GITHUB STATS
+    // =========================
+    await supabase.from("github_stats").upsert(
+      {
+        user_id: userId,
+        github_username: username,
+        streak,
+        total_contributions: contributions.totalContributions,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: "user_id",
+      }
+    );
+
+    // =========================
+    // SAVE HEATMAP
+    // =========================
+    const heatmapRows = heatmap.map((day: any) => ({
+      user_id: userId,
+      contribution_date: day.date,
+      contribution_count: day.count,
+    }));
+
+    if (heatmapRows.length > 0) {
+      await supabase.from("github_heatmap").upsert(heatmapRows, {
+        onConflict: "user_id,contribution_date",
       });
     }
 

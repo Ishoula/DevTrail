@@ -48,6 +48,16 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // GitHub sync state
+  const [githubToken, setGithubToken] = useState('');
+  const [githubConnected, setGithubConnected] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [heatmap, setHeatmap] = useState<HeatmapDay[]>([]);
+
+  const githubOAuthUrl = `https://github.com/login/oauth/authorize?client_id=${process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID}&scope=read:user repo`;
+
+
   useEffect(() => {
     if (!user) return;
     const fetchDashboard = async () => {
@@ -149,6 +159,63 @@ export default function DashboardPage() {
     };
     fetchDashboard();
   }, [user]);
+
+  // Load GitHub connection from user metadata
+  useEffect(() => {
+    if (!user) return;
+    const token = user.user_metadata?.github_token;
+    if (token) {
+      setGithubToken(token);
+      setGithubConnected(true);
+      // optional auto sync on load
+      syncGitHub(token);
+    } else {
+      setGithubConnected(false);
+    }
+  }, [user]);
+
+  const syncGitHub = async (tokenOverride?: string) => {
+    const token = tokenOverride || githubToken;
+    if (!user || !token) return;
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      const accessToken = session.session?.access_token;
+      if (!accessToken) {
+        setSyncResult('No session found');
+        setSyncing(false);
+        return;
+      }
+      const { data, error } = await supabase.functions.invoke<GitHubSyncResponse>(
+        'github-sync',
+        {
+          body: {
+            user_id: user.id,
+            github_token: token,
+          },
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+      if (error) {
+        setSyncResult(error.message);
+        setSyncing(false);
+        return;
+      }
+      if (data?.success) {
+        setHeatmap(data.heatmap ?? []);
+        setSyncResult(`🔥 ${data.streak ?? 0} day streak • ⭐ ${data.total_contributions ?? 0} contributions • 📦 ${data.repos_synced ?? 0} repos`);
+      } else {
+        setSyncResult(data?.error || 'Sync failed');
+      }
+    } catch {
+      setSyncResult('Unexpected error occurred');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   if (loading || !data) {
     return (
@@ -337,7 +404,43 @@ export default function DashboardPage() {
             )}
           </CardContent>
         </Card>
-      </div>
+      <Card className="border-border/50">
+  <CardHeader>
+    <CardTitle className="text-base">GitHub Sync</CardTitle>
+    <CardDescription>Connect and sync your GitHub data</CardDescription>
+  </CardHeader>
+  <CardContent className="space-y-4">
+    {/* Status */}
+    <div className="flex items-center gap-2 text-sm">
+      <div className={`h-2 w-2 rounded-full ${githubConnected ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+      {githubConnected ? 'Connected' : 'Not connected'}
+    </div>
+    {/* CONNECT BUTTON */}
+    <Button asChild>
+      <a href={githubOAuthUrl}>
+        <Github className="w-4 h-4 mr-2" />
+        {githubConnected ? 'Reconnect GitHub' : 'Connect GitHub'}
+      </a>
+    </Button>
+    {/* SYNC BUTTON */}
+    <Button variant="outline" onClick={() => syncGitHub()} disabled={syncing || !githubToken}>
+      {syncing ? 'Syncing...' : 'Sync Data'}
+    </Button>
+    {/* RESULT */}
+    {syncResult && (
+      <p className="text-sm text-muted-foreground">
+        {syncResult}
+      </p>
+    )}
+    {/* HEATMAP INFO */}
+    {heatmap.length > 0 && (
+      <p className="text-xs text-muted-foreground">
+        Heatmap loaded: {heatmap.length} active days
+      </p>
+    )}
+  </CardContent>
+</Card>
+</div>
     </div>
   );
 }
