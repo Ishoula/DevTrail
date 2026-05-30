@@ -3,15 +3,25 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { GitCommitHorizontal, FolderKanban, CircleCheck as CheckCircle2, Clock, TrendingUp, Flame, Activity } from 'lucide-react';
+import {
+  GitCommitHorizontal,
+  FolderKanban,
+  CircleCheck as CheckCircle2,
+  TrendingUp,
+  Flame,
+} from 'lucide-react';
 import {
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
-  type ChartConfig,
 } from '@/components/ui/chart';
 import {
   AreaChart,
@@ -22,19 +32,22 @@ import {
   BarChart,
   Bar,
 } from 'recharts';
+import { Button } from '@/components/ui/button';
+import { Github } from 'lucide-react';
 
-const weeklyChartConfig = {
-  commits: { label: 'Commits', color: 'hsl(var(--primary))' },
-  tasks: { label: 'Tasks', color: 'hsl(var(--chart-2))' },
-} satisfies ChartConfig;
-
-const sessionChartConfig = {
-  hours: { label: 'Hours', color: 'hsl(var(--chart-3))' },
-} satisfies ChartConfig;
+interface HeatmapDay {
+  date: string;
+  count: number;
+}
 
 interface DashboardData {
   projectCount: number;
-  taskCounts: { todo: number; in_progress: number; review: number; completed: number };
+  taskCounts: {
+    todo: number;
+    in_progress: number;
+    review: number;
+    completed: number;
+  };
   commitCount: number;
   codingStreak: number;
   productivityScore: number;
@@ -45,11 +58,10 @@ interface DashboardData {
 
 export default function DashboardPage() {
   const { user } = useAuth();
+
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // GitHub sync state
-  const [githubToken, setGithubToken] = useState('');
   const [githubConnected, setGithubConnected] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
@@ -57,45 +69,71 @@ export default function DashboardPage() {
 
   const githubOAuthUrl = `https://github.com/login/oauth/authorize?client_id=${process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID}&scope=read:user repo`;
 
-
+  // =========================
+  // LOAD DASHBOARD DATA
+  // =========================
   useEffect(() => {
     if (!user) return;
+
     const fetchDashboard = async () => {
-      const [projectsRes, tasksRes, commitsRes, sessionsRes] = await Promise.all([
-        supabase.from('projects').select('id, name, status', { count: 'exact' }).eq('user_id', user.id),
-        supabase.from('tasks').select('status, project_id').in(
-          'project_id',
-          (await supabase.from('projects').select('id').eq('user_id', user.id)).data?.map((p) => p.id) || ['']
-        ),
-        supabase.from('commits').select('committed_at').eq('user_id', user.id).order('committed_at', { ascending: false }).limit(100),
-        supabase.from('coding_sessions').select('duration_minutes, started_at').eq('user_id', user.id),
-      ]);
+      const { data: projects } = await supabase
+        .from('projects')
+        .select('id, name, status')
+        .eq('user_id', user.id);
 
-      const projects = projectsRes.data || [];
-      const tasks = tasksRes.data || [];
-      const commits = commitsRes.data || [];
-      const sessions = sessionsRes.data || [];
+      const projectIds = projects?.map((p) => p.id) ?? [];
 
+      const { data: tasks } = await supabase
+        .from('tasks')
+        .select('status, project_id')
+        .in('project_id', projectIds.length ? projectIds : ['__none__']);
+
+      const { data: commits } = await supabase
+        .from('commits')
+        .select('committed_at')
+        .eq('user_id', user.id)
+        .order('committed_at', { ascending: false })
+        .limit(100);
+
+      const { data: sessions } = await supabase
+        .from('coding_sessions')
+        .select('duration_minutes, started_at')
+        .eq('user_id', user.id);
+
+      const taskList = tasks ?? [];
+      const commitList = commits ?? [];
+      const sessionList = sessions ?? [];
+
+      // =========================
+      // TASK COUNTS
+      // =========================
       const taskCounts = {
-        todo: tasks.filter((t) => t.status === 'todo').length,
-        in_progress: tasks.filter((t) => t.status === 'in_progress').length,
-        review: tasks.filter((t) => t.status === 'review').length,
-        completed: tasks.filter((t) => t.status === 'completed').length,
+        todo: taskList.filter((t) => t.status === 'todo').length,
+        in_progress: taskList.filter((t) => t.status === 'in_progress').length,
+        review: taskList.filter((t) => t.status === 'review').length,
+        completed: taskList.filter((t) => t.status === 'completed').length,
       };
 
-      const totalTasks = tasks.length;
-      const completedTasks = taskCounts.completed;
-      const productivityScore = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+      const totalTasks = taskList.length;
+      const productivityScore =
+        totalTasks > 0
+          ? Math.round((taskCounts.completed / totalTasks) * 100)
+          : 0;
 
-      // Calculate streak from commits
-      const commitDates = Array.from(new Set(commits.map((c) => new Date(c.committed_at).toDateString()))).sort(
-        (a, b) => new Date(b).getTime() - new Date(a).getTime()
-      );
+      // =========================
+      // STREAK
+      // =========================
+      const commitDates = Array.from(
+        new Set(commitList.map((c) => new Date(c.committed_at).toDateString()))
+      ).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+
       let streak = 0;
       const today = new Date();
+
       for (let i = 0; i < commitDates.length; i++) {
         const expected = new Date(today);
         expected.setDate(today.getDate() - i);
+
         if (commitDates[i] === expected.toDateString()) {
           streak++;
         } else {
@@ -103,344 +141,241 @@ export default function DashboardPage() {
         }
       }
 
-      // Weekly data
+      // =========================
+      // WEEKLY DATA
+      // =========================
       const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       const now = new Date();
+
       const weeklyData = days.map((day, i) => {
         const date = new Date(now);
-        date.setDate(now.getDate() - (now.getDay() - i - 1 + 7) % 7);
+        date.setDate(now.getDate() - ((now.getDay() - i - 1 + 7) % 7));
         const dateStr = date.toDateString();
+
         return {
           day,
-          commits: commits.filter((c) => new Date(c.committed_at).toDateString() === dateStr).length,
-          tasks: Math.floor(Math.random() * 3) + (totalTasks > 0 ? 1 : 0),
+          commits: commitList.filter(
+            (c) => new Date(c.committed_at).toDateString() === dateStr
+          ).length,
+          tasks: Math.floor(Math.random() * 3),
         };
       });
 
-      // Session data
+      // =========================
+      // SESSION DATA
+      // =========================
       const sessionData = days.map((day, i) => {
         const date = new Date(now);
-        date.setDate(now.getDate() - (now.getDay() - i - 1 + 7) % 7);
+        date.setDate(now.getDate() - ((now.getDay() - i - 1 + 7) % 7));
         const dateStr = date.toDateString();
-        const daySessions = sessions.filter((s) => new Date(s.started_at).toDateString() === dateStr);
+
+        const daySessions = sessionList.filter(
+          (s) => new Date(s.started_at).toDateString() === dateStr
+        );
+
         return {
           day,
-          hours: Math.round((daySessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0) / 60) * 10) / 10,
+          hours:
+            Math.round(
+              (daySessions.reduce(
+                (sum, s) => sum + (s.duration_minutes || 0),
+                0
+              ) /
+                60) *
+                10
+            ) / 10,
         };
       });
 
-      // Recent activity
+      // =========================
+      // RECENT ACTIVITY
+      // =========================
       const recentActivity = [
-        ...commits.slice(0, 3).map((c) => ({
+        ...commitList.slice(0, 3).map((c) => ({
           id: `commit-${c.committed_at}`,
           type: 'commit',
           title: 'New commit pushed',
           time: new Date(c.committed_at).toLocaleDateString(),
         })),
-        ...tasks.filter((t) => t.status === 'completed').slice(0, 2).map((t) => ({
-          id: `task-${t.status}`,
-          type: 'task',
-          title: 'Task completed',
-          time: 'Recently',
-        })),
       ].slice(0, 5);
 
       setData({
-        projectCount: projectsRes.count || 0,
+        projectCount: projects?.length ?? 0,
         taskCounts,
-        commitCount: commits.length,
+        commitCount: commitList.length,
         codingStreak: streak,
         productivityScore,
         weeklyData,
         sessionData,
         recentActivity,
       });
+
       setLoading(false);
     };
+
     fetchDashboard();
   }, [user]);
 
-  // Load GitHub connection from user metadata
+  // =========================
+  // GITHUB CONNECTION STATE
+  // =========================
   useEffect(() => {
     if (!user) return;
+
     const token = user.user_metadata?.github_token;
-    if (token) {
-      setGithubToken(token);
-      setGithubConnected(true);
-      // optional auto sync on load
-      syncGitHub(token);
-    } else {
-      setGithubConnected(false);
-    }
+    setGithubConnected(!!token);
   }, [user]);
 
-  const syncGitHub = async (tokenOverride?: string) => {
-    const token = tokenOverride || githubToken;
-    if (!user || !token) return;
+  // =========================
+  // SYNC GITHUB (reads from edge function)
+  // =========================
+  const syncGitHub = async () => {
+    if (!user) return;
+
     setSyncing(true);
     setSyncResult(null);
+
     try {
-      const { data: session } = await supabase.auth.getSession();
-      const accessToken = session.session?.access_token;
-      if (!accessToken) {
-        setSyncResult('No session found');
-        setSyncing(false);
-        return;
-      }
-      const { data, error } = await supabase.functions.invoke<GitHubSyncResponse>(
+      const { data, error } = await supabase.functions.invoke(
         'github-sync',
         {
           body: {
-            user_id: user.id,
-            github_token: token,
-          },
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
+            github_token: user.user_metadata?.github_token,
           },
         }
       );
+
       if (error) {
         setSyncResult(error.message);
-        setSyncing(false);
         return;
       }
+
       if (data?.success) {
         setHeatmap(data.heatmap ?? []);
-        setSyncResult(`🔥 ${data.streak ?? 0} day streak • ⭐ ${data.total_contributions ?? 0} contributions • 📦 ${data.repos_synced ?? 0} repos`);
+        setSyncResult(
+          `🔥 ${data.streak} day streak • ⭐ ${data.total_contributions} contributions`
+        );
       } else {
         setSyncResult(data?.error || 'Sync failed');
       }
     } catch {
-      setSyncResult('Unexpected error occurred');
+      setSyncResult('Unexpected error');
     } finally {
       setSyncing(false);
     }
   };
 
+  // =========================
+  // LOADING STATE
+  // =========================
   if (loading || !data) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground">Welcome back! Here&apos;s your overview.</p>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {[1, 2, 3, 4].map((i) => (
-            <Card key={i} className="animate-pulse">
-              <CardContent className="p-6">
-                <div className="h-20 bg-muted rounded" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
-    );
+    return <div className="p-6">Loading dashboard...</div>;
   }
 
+  // =========================
+  // UI
+  // =========================
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground">Welcome back! Here&apos;s your overview.</p>
+        <p className="text-muted-foreground">
+          Welcome back! Here&apos;s your overview.
+        </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="border-border/50">
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center justify-between">
-              <div className="min-w-0">
-                <p className="text-sm text-muted-foreground">Productivity Score</p>
-                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.productivityScore}%</p>
-              </div>
-              <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                <TrendingUp className="h-6 w-6 text-primary" />
-              </div>
-            </div>
-            <Progress value={data.productivityScore} className="mt-3 h-1.5" />
+      {/* TOP CARDS */}
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card>
+          <CardContent className="p-4">
+            <p>Productivity</p>
+            <h2 className="text-2xl font-bold">
+              {data.productivityScore}%
+            </h2>
+            <Progress value={data.productivityScore} />
           </CardContent>
         </Card>
 
-        <Card className="border-border/50">
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center justify-between">
-              <div className="min-w-0">
-                <p className="text-sm text-muted-foreground">Total Commits</p>
-                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.commitCount}</p>
-              </div>
-              <div className="h-12 w-12 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-                <GitCommitHorizontal className="h-6 w-6 text-emerald-500" />
-              </div>
-            </div>
+        <Card>
+          <CardContent className="p-4">
+            <p>Commits</p>
+            <h2 className="text-2xl font-bold">{data.commitCount}</h2>
           </CardContent>
         </Card>
 
-        <Card className="border-border/50">
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center justify-between">
-              <div className="min-w-0">
-                <p className="text-sm text-muted-foreground">Coding Streak</p>
-                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.codingStreak} <span className="text-base font-normal text-muted-foreground">days</span></p>
-              </div>
-              <div className="h-12 w-12 rounded-lg bg-orange-500/10 flex items-center justify-center">
-                <Flame className="h-6 w-6 text-orange-500" />
-              </div>
-            </div>
+        <Card>
+          <CardContent className="p-4">
+            <p>Streak</p>
+            <h2 className="text-2xl font-bold">
+              {data.codingStreak} days
+            </h2>
           </CardContent>
         </Card>
 
-        <Card className="border-border/50">
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center justify-between">
-              <div className="min-w-0">
-                <p className="text-sm text-muted-foreground">Active Projects</p>
-                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.projectCount}</p>
-              </div>
-              <div className="h-12 w-12 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                <FolderKanban className="h-6 w-6 text-blue-500" />
-              </div>
-            </div>
+        <Card>
+          <CardContent className="p-4">
+            <p>Projects</p>
+            <h2 className="text-2xl font-bold">
+              {data.projectCount}
+            </h2>
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-7">
-        <Card className="overflow-hidden border-border/50 lg:col-span-4">
+      {/* CHARTS */}
+      <div className="grid md:grid-cols-2 gap-4">
+        <Card>
           <CardHeader>
-            <CardTitle className="text-base">Weekly Activity</CardTitle>
-            <CardDescription>Commits and tasks completed this week</CardDescription>
+            <CardTitle>Weekly Activity</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="scrollbar-chart -mx-2 overflow-x-auto pb-3 sm:mx-0">
-              <ChartContainer config={weeklyChartConfig} className="h-[220px] min-w-[520px] sm:h-[250px] sm:min-w-0">
-                <AreaChart data={data.weeklyData} margin={{ left: 0, right: 12 }}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
-                  <XAxis dataKey="day" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                  <YAxis className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} width={32} />
-                  <ChartTooltip content={<ChartTooltipContent />} />
-                  <Area type="monotone" dataKey="commits" stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.1} strokeWidth={2} />
-                  <Area type="monotone" dataKey="tasks" stroke="hsl(var(--chart-2))" fill="hsl(var(--chart-2))" fillOpacity={0.1} strokeWidth={2} />
-                </AreaChart>
-              </ChartContainer>
-            </div>
+            <AreaChart width={400} height={250} data={data.weeklyData}>
+              <XAxis dataKey="day" />
+              <YAxis />
+              <Area dataKey="commits" />
+              <Area dataKey="tasks" />
+            </AreaChart>
           </CardContent>
         </Card>
 
-        <Card className="overflow-hidden border-border/50 lg:col-span-3">
+        <Card>
           <CardHeader>
-            <CardTitle className="text-base">Coding Hours</CardTitle>
-            <CardDescription>Estimated hours per day</CardDescription>
+            <CardTitle>Coding Hours</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="scrollbar-chart -mx-2 overflow-x-auto pb-3 sm:mx-0">
-              <ChartContainer config={sessionChartConfig} className="h-[220px] min-w-[520px] sm:h-[250px] sm:min-w-0">
-                <BarChart data={data.sessionData} margin={{ left: 0, right: 12 }}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
-                  <XAxis dataKey="day" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} />
-                  <YAxis className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} width={32} />
-                  <ChartTooltip content={<ChartTooltipContent />} />
-                  <Bar dataKey="hours" fill="hsl(var(--chart-3))" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ChartContainer>
-            </div>
+            <BarChart width={400} height={250} data={data.sessionData}>
+              <XAxis dataKey="day" />
+              <YAxis />
+              <Bar dataKey="hours" />
+            </BarChart>
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-7">
-        <Card className="border-border/50 lg:col-span-4">
-          <CardHeader>
-            <CardTitle className="text-base">Task Summary</CardTitle>
-            <CardDescription>Current task distribution</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {[
-                { label: 'Completed', count: data.taskCounts.completed, color: 'bg-emerald-500', textColor: 'text-emerald-500' },
-                { label: 'In Progress', count: data.taskCounts.in_progress, color: 'bg-blue-500', textColor: 'text-blue-500' },
-                { label: 'In Review', count: data.taskCounts.review, color: 'bg-amber-500', textColor: 'text-amber-500' },
-                { label: 'Todo', count: data.taskCounts.todo, color: 'bg-zinc-500', textColor: 'text-zinc-500' },
-              ].map((item) => {
-                const total = Object.values(data.taskCounts).reduce((a, b) => a + b, 0);
-                const pct = total > 0 ? Math.round((item.count / total) * 100) : 0;
-                return (
-                  <div key={item.label} className="flex items-center gap-3">
-                    <div className={`h-3 w-3 rounded-full ${item.color}`} />
-                    <span className="text-sm flex-1">{item.label}</span>
-                    <span className={`text-sm font-semibold ${item.textColor}`}>{item.count}</span>
-                    <span className="text-xs text-muted-foreground w-10 text-right">{pct}%</span>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
+      {/* GITHUB SYNC */}
+      <Card>
+        <CardHeader>
+          <CardTitle>GitHub Sync</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Button onClick={syncGitHub} disabled={syncing}>
+            <Github className="w-4 h-4 mr-2" />
+            {syncing ? 'Syncing...' : 'Sync GitHub'}
+          </Button>
 
-        <Card className="border-border/50 lg:col-span-3">
-          <CardHeader>
-            <CardTitle className="text-base">Recent Activity</CardTitle>
-            <CardDescription>Latest updates</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {data.recentActivity.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">No recent activity</p>
-            ) : (
-              <div className="space-y-3">
-                {data.recentActivity.map((activity) => (
-                  <div key={activity.id} className="flex items-start gap-3">
-                    <div className="mt-0.5">
-                      {activity.type === 'commit' ? (
-                        <GitCommitHorizontal className="h-4 w-4 text-emerald-500" />
-                      ) : (
-                        <CheckCircle2 className="h-4 w-4 text-blue-500" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm truncate">{activity.title}</p>
-                      <p className="text-xs text-muted-foreground">{activity.time}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      <Card className="border-border/50">
-  <CardHeader>
-    <CardTitle className="text-base">GitHub Sync</CardTitle>
-    <CardDescription>Connect and sync your GitHub data</CardDescription>
-  </CardHeader>
-  <CardContent className="space-y-4">
-    {/* Status */}
-    <div className="flex items-center gap-2 text-sm">
-      <div className={`h-2 w-2 rounded-full ${githubConnected ? 'bg-green-500' : 'bg-gray-400'}`}></div>
-      {githubConnected ? 'Connected' : 'Not connected'}
-    </div>
-    {/* CONNECT BUTTON */}
-    <Button asChild>
-      <a href={githubOAuthUrl}>
-        <Github className="w-4 h-4 mr-2" />
-        {githubConnected ? 'Reconnect GitHub' : 'Connect GitHub'}
-      </a>
-    </Button>
-    {/* SYNC BUTTON */}
-    <Button variant="outline" onClick={() => syncGitHub()} disabled={syncing || !githubToken}>
-      {syncing ? 'Syncing...' : 'Sync Data'}
-    </Button>
-    {/* RESULT */}
-    {syncResult && (
-      <p className="text-sm text-muted-foreground">
-        {syncResult}
-      </p>
-    )}
-    {/* HEATMAP INFO */}
-    {heatmap.length > 0 && (
-      <p className="text-xs text-muted-foreground">
-        Heatmap loaded: {heatmap.length} active days
-      </p>
-    )}
-  </CardContent>
-</Card>
-</div>
+          {syncResult && (
+            <p className="text-sm text-muted-foreground">
+              {syncResult}
+            </p>
+          )}
+
+          {heatmap.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Heatmap loaded: {heatmap.length} days
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
