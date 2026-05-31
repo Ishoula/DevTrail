@@ -157,6 +157,7 @@ export type Database = {
       github_stats: {
         Row: {
           github_username: string | null
+          repos_synced: number | null
           streak: number | null
           total_contributions: number | null
           updated_at: string | null
@@ -164,6 +165,7 @@ export type Database = {
         }
         Insert: {
           github_username?: string | null
+          repos_synced?: number | null
           streak?: number | null
           total_contributions?: number | null
           updated_at?: string | null
@@ -171,6 +173,7 @@ export type Database = {
         }
         Update: {
           github_username?: string | null
+          repos_synced?: number | null
           streak?: number | null
           total_contributions?: number | null
           updated_at?: string | null

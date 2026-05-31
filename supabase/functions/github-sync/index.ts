@@ -251,6 +251,7 @@ Deno.serve(async (req: Request) => {
         github_username: username,
         streak,
         total_contributions: contributions.totalContributions,
+        repos_synced:repoRecords.length,
         updated_at: new Date().toISOString(),
       },
       {
