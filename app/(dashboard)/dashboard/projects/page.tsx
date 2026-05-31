@@ -30,15 +30,16 @@ import { Plus, MoveHorizontal as MoreHorizontal, FolderKanban, Pencil, Trash2, A
 interface Project {
   id: string;
   name: string;
-  description: string;
+  description: string | null;
   color: string;
   status: string;
-  github_repo: string;
-  created_at: string;
+  github_repo: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  user_id: string;
   taskCount?: number;
   completedCount?: number;
 }
-
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
 export default function ProjectsPage() {
@@ -178,9 +179,9 @@ export default function ProjectsPage() {
     setError('');
     setForm({
       name: project.name,
-      description: project.description,
+      description: project.description ?? '',
       color: project.color,
-      github_repo: project.github_repo,
+      github_repo: project.github_repo ?? '',
     });
     setDialogOpen(true);
   };
