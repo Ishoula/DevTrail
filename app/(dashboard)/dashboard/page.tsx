@@ -14,33 +14,18 @@ import { Progress } from '@/components/ui/progress';
 import {
   GitCommitHorizontal,
   FolderKanban,
-  CircleCheck as CheckCircle2,
-  TrendingUp,
   Flame,
 } from 'lucide-react';
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-} from '@/components/ui/chart';
 import {
   AreaChart,
   Area,
   XAxis,
   YAxis,
-  CartesianGrid,
   BarChart,
   Bar,
 } from 'recharts';
 import { Button } from '@/components/ui/button';
 import { Github } from 'lucide-react';
-
-
-interface HeatmapDay {
-  contribution_date: string;
-  contribution_count: number | null;
-}
-
 
 interface DashboardData {
   projectCount: number;
@@ -64,21 +49,17 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [githubConnected, setGithubConnected] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
-  const [heatmap, setHeatmap] = useState<HeatmapDay[]>([]);
-  const [githubStreak, setGithubStreak] = useState<number>(0);
-  const [totalContributions, setTotalContributions] = useState<number>(0);
-  const [reposSynced, setReposSynced] = useState<number>(0);
 
-  const githubOAuthUrl = `https://github.com/login/oauth/authorize?client_id=${process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID}&scope=read:user repo`;
+  const [githubStreak, setGithubStreak] = useState(0);
+  const [totalContributions, setTotalContributions] = useState(0);
+  const [reposSynced, setReposSynced] = useState(0);
 
   // =========================
-  // GITHUB CONNECTION STATE
-  // Fetch dashboard core data
+  // FETCH DASHBOARD DATA
+  // =========================
   async function fetchDashboard() {
-    // Core project/data queries
     const { data: projects } = await supabase
       .from('projects')
       .select('id, name, status')
@@ -103,20 +84,26 @@ export default function DashboardPage() {
       .select('duration_minutes, started_at')
       .eq('user_id', user!.id);
 
-    // New: fetch GitHub stats and heatmap
+    // =========================
+    // GITHUB STATS ONLY
+    // =========================
     const { data: githubStats } = await supabase
       .from('github_stats')
-      .select('*')
+      .select(`
+        github_username,
+        streak,
+        total_contributions,
+        repos_synced,
+        updated_at
+      `)
       .eq('user_id', user!.id)
       .single();
 
-    const { data: githubHeatmap } = await supabase
-      .from('github_heatmap')
-      .select('contribution_date,contribution_count')
-      .eq('user_id', user!.id);
-
-    // Process task counts
+    // =========================
+    // TASK PROCESSING
+    // =========================
     const taskList = tasks ?? [];
+
     const taskCounts = {
       todo: taskList.filter((t) => t.status === 'todo').length,
       in_progress: taskList.filter((t) => t.status === 'in_progress').length,
@@ -125,20 +112,32 @@ export default function DashboardPage() {
     };
 
     const totalTasks = taskList.length;
-    const productivityScore = totalTasks > 0 ? Math.round((taskCounts.completed / totalTasks) * 100) : 0;
+    const productivityScore =
+      totalTasks > 0
+        ? Math.round((taskCounts.completed / totalTasks) * 100)
+        : 0;
 
-    // Streak calculation
+    // =========================
+    // STREAK CALCULATION
+    // =========================
     const commitDates = Array.from(
       new Set(
-        (commits ?? []).map((c) => new Date(c.committed_at).toDateString())
+        (commits ?? []).map((c) =>
+          new Date(c.committed_at).toDateString()
+        )
       )
-    ).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+    ).sort(
+      (a, b) =>
+        new Date(b).getTime() - new Date(a).getTime()
+    );
 
     let streak = 0;
     const today = new Date();
+
     for (let i = 0; i < commitDates.length; i++) {
       const expected = new Date(today);
       expected.setDate(today.getDate() - i);
+
       if (commitDates[i] === expected.toDateString()) {
         streak++;
       } else {
@@ -146,40 +145,66 @@ export default function DashboardPage() {
       }
     }
 
-    // Weekly and session data
+    // =========================
+    // WEEKLY DATA
+    // =========================
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const now = new Date();
+
     const weeklyData = days.map((day, i) => {
       const date = new Date(now);
-      date.setDate(now.getDate() - ((now.getDay() - i - 1 + 7) % 7));
+      date.setDate(
+        now.getDate() -
+          ((now.getDay() - i - 1 + 7) % 7)
+      );
+
       const dateStr = date.toDateString();
+
       return {
         day,
-        commits: (commits ?? []).filter((c) => new Date(c.committed_at).toDateString() === dateStr).length,
+        commits: (commits ?? []).filter(
+          (c) =>
+            new Date(c.committed_at).toDateString() === dateStr
+        ).length,
         tasks: Math.floor(Math.random() * 3),
       };
     });
 
+    // =========================
+    // SESSION DATA
+    // =========================
     const sessionData = days.map((day, i) => {
       const date = new Date(now);
-      date.setDate(now.getDate() - ((now.getDay() - i - 1 + 7) % 7));
+      date.setDate(
+        now.getDate() -
+          ((now.getDay() - i - 1 + 7) % 7)
+      );
+
       const dateStr = date.toDateString();
-      const daySessions = (sessions ?? []).filter((s) => new Date(s.started_at).toDateString() === dateStr);
+
+      const daySessions = (sessions ?? []).filter(
+        (s) =>
+          new Date(s.started_at).toDateString() === dateStr
+      );
+
       return {
         day,
-        hours: Math.round((daySessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0) / 60) * 10) / 10,
+        hours:
+          Math.round(
+            (daySessions.reduce(
+              (sum, s) =>
+                sum + (s.duration_minutes || 0),
+              0
+            ) /
+              60) *
+              10
+          ) / 10,
       };
     });
 
-    // Recent activity (commits only for simplicity)
-    const recentActivity = (commits ?? []).slice(0, 3).map((c) => ({
-      id: `commit-${c.committed_at}`,
-      type: 'commit',
-      title: 'New commit pushed',
-      time: new Date(c.committed_at).toLocaleString(),
-    }));
-
-    // Set state
+    // =========================
+    // SET MAIN DATA
+    // =========================
     setData({
       projectCount: projects?.length ?? 0,
       taskCounts,
@@ -188,33 +213,43 @@ export default function DashboardPage() {
       productivityScore,
       weeklyData,
       sessionData,
-      recentActivity,
+      recentActivity: (commits ?? [])
+        .slice(0, 3)
+        .map((c) => ({
+          id: `commit-${c.committed_at}`,
+          type: 'commit',
+          title: 'New commit pushed',
+          time: new Date(
+            c.committed_at
+          ).toLocaleString(),
+        })),
     });
 
-    // Update GitHub related UI state
-    setHeatmap(githubHeatmap ?? []);
+    // =========================
+    // GITHUB STATS SET
+    // =========================
     if (githubStats) {
-      const { streak, total_contributions, repos_synced } = githubStats;
-      setGithubStreak(streak ?? 0);
-      setTotalContributions(total_contributions ?? 0);
-      setReposSynced(repos_synced ?? 0);
-      setSyncResult(`🔥 ${streak ?? 0} day streak • ⭐ ${total_contributions ?? 0} contributions • 📦 ${repos_synced ?? 0} repos`);
+      setGithubStreak(githubStats.streak ?? 0);
+      setTotalContributions(
+        githubStats.total_contributions ?? 0
+      );
+      setReposSynced(
+        githubStats.repos_synced ?? 0
+      );
     }
 
     setLoading(false);
   }
 
   // =========================
-  // LOAD DASHBOARD DATA
+  // INIT
   // =========================
   useEffect(() => {
-    if (user) {
-      fetchDashboard();
-    }
+    if (user) fetchDashboard();
   }, [user]);
 
   // =========================
-  // SYNC GITHUB (reads from edge function)
+  // SYNC GITHUB
   // =========================
   const syncGitHub = async () => {
     if (!user) return;
@@ -223,14 +258,16 @@ export default function DashboardPage() {
     setSyncResult(null);
 
     try {
-      const { data, error } = await supabase.functions.invoke(
-        'github-sync',
-        {
-          body: {
-            github_token: user.user_metadata?.github_token,
-          },
-        }
-      );
+      const { data, error } =
+        await supabase.functions.invoke(
+          'github-sync',
+          {
+            body: {
+              github_token:
+                user.user_metadata?.github_token,
+            },
+          }
+        );
 
       if (error) {
         setSyncResult(error.message);
@@ -238,12 +275,14 @@ export default function DashboardPage() {
       }
 
       if (data?.success) {
-        setHeatmap(data.heatmap ?? []);
+        await fetchDashboard();
         setSyncResult(
-          `🔥 ${data.streak} day streak • ⭐ ${data.total_contributions} contributions`
+          'GitHub synced successfully'
         );
       } else {
-        setSyncResult(data?.error || 'Sync failed');
+        setSyncResult(
+          data?.error || 'Sync failed'
+        );
       }
     } catch {
       setSyncResult('Unexpected error');
@@ -253,10 +292,14 @@ export default function DashboardPage() {
   };
 
   // =========================
-  // LOADING STATE
+  // LOADING
   // =========================
   if (loading || !data) {
-    return <div className="p-6">Loading dashboard...</div>;
+    return (
+      <div className="p-6">
+        Loading dashboard...
+      </div>
+    );
   }
 
   // =========================
@@ -265,7 +308,9 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <h1 className="text-2xl font-bold">
+          Dashboard
+        </h1>
         <p className="text-muted-foreground">
           Welcome back! Here&apos;s your overview.
         </p>
@@ -279,14 +324,18 @@ export default function DashboardPage() {
             <h2 className="text-2xl font-bold">
               {data.productivityScore}%
             </h2>
-            <Progress value={data.productivityScore} />
+            <Progress
+              value={data.productivityScore}
+            />
           </CardContent>
         </Card>
 
         <Card>
           <CardContent className="p-4">
             <p>Commits</p>
-            <h2 className="text-2xl font-bold">{data.commitCount}</h2>
+            <h2 className="text-2xl font-bold">
+              {data.commitCount}
+            </h2>
           </CardContent>
         </Card>
 
@@ -313,10 +362,16 @@ export default function DashboardPage() {
       <div className="grid md:grid-cols-2 gap-4">
         <Card>
           <CardHeader>
-            <CardTitle>Weekly Activity</CardTitle>
+            <CardTitle>
+              Weekly Activity
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <AreaChart width={400} height={250} data={data.weeklyData}>
+            <AreaChart
+              width={400}
+              height={250}
+              data={data.weeklyData}
+            >
               <XAxis dataKey="day" />
               <YAxis />
               <Area dataKey="commits" />
@@ -327,10 +382,16 @@ export default function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Coding Hours</CardTitle>
+            <CardTitle>
+              Coding Hours
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <BarChart width={400} height={250} data={data.sessionData}>
+            <BarChart
+              width={400}
+              height={250}
+              data={data.sessionData}
+            >
               <XAxis dataKey="day" />
               <YAxis />
               <Bar dataKey="hours" />
@@ -339,27 +400,63 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* GITHUB SYNC */}
+      {/* GITHUB */}
       <Card>
         <CardHeader>
-          <CardTitle>GitHub Sync</CardTitle>
+          <CardTitle>
+            GitHub Stats
+          </CardTitle>
+          <CardDescription>
+            Synced from your GitHub account
+          </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <Button onClick={syncGitHub} disabled={syncing}>
+
+        <CardContent className="space-y-4">
+          <Button
+            onClick={syncGitHub}
+            disabled={syncing}
+          >
             <Github className="w-4 h-4 mr-2" />
-            {syncing ? 'Syncing...' : 'Sync GitHub'}
+            {syncing
+              ? 'Syncing...'
+              : 'Sync GitHub'}
           </Button>
 
-          {githubStreak > 0 && (
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="border rounded-lg p-4">
+              <div className="flex items-center gap-2">
+                <Flame className="w-4 h-4 text-orange-500" />
+                <span>Streak</span>
+              </div>
+              <p className="text-2xl font-bold">
+                {githubStreak}
+              </p>
+            </div>
+
+            <div className="border rounded-lg p-4">
+              <div className="flex items-center gap-2">
+                <GitCommitHorizontal className="w-4 h-4" />
+                <span>Contributions</span>
+              </div>
+              <p className="text-2xl font-bold">
+                {totalContributions}
+              </p>
+            </div>
+
+            <div className="border rounded-lg p-4">
+              <div className="flex items-center gap-2">
+                <FolderKanban className="w-4 h-4" />
+                <span>Repos</span>
+              </div>
+              <p className="text-2xl font-bold">
+                {reposSynced}
+              </p>
+            </div>
+          </div>
+
+          {syncResult && (
             <p className="text-sm text-muted-foreground">
-              🔥 {githubStreak} day streak • ⭐ {totalContributions} contributions • 📦 {reposSynced} repos
-            </p>
-          )}
-
-
-          {heatmap.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              Heatmap loaded: {heatmap.length} days
+              {syncResult}
             </p>
           )}
         </CardContent>
