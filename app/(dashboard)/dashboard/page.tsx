@@ -10,15 +10,13 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
 import {
+  Clock,
   GitCommitHorizontal,
   FolderKanban,
   Flame,
 } from 'lucide-react';
 import {
-  AreaChart,
-  Area,
   XAxis,
   YAxis,
   BarChart,
@@ -37,8 +35,9 @@ interface DashboardData {
   };
   commitCount: number;
   codingStreak: number;
+  totalCodingHours: number;
   productivityScore: number;
-  weeklyData: { day: string; commits: number; tasks: number }[];
+  taskStatusData: { status: string; tasks: number }[];
   sessionData: { day: string; hours: number }[];
   recentActivity: { id: string; type: string; title: string; time: string }[];
 }
@@ -145,44 +144,46 @@ export default function DashboardPage() {
       }
     }
 
-    // =========================
-    // WEEKLY DATA
-    // =========================
+    const taskStatusData = [
+      { status: 'Todo', tasks: taskCounts.todo },
+      { status: 'In Progress', tasks: taskCounts.in_progress },
+      { status: 'Review', tasks: taskCounts.review },
+      { status: 'Completed', tasks: taskCounts.completed },
+    ];
+
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const now = new Date();
+    const currentDay = now.getDay();
+    const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - distanceToMonday);
+    weekStart.setHours(0, 0, 0, 0);
 
-    const weeklyData = days.map((day, i) => {
-      const date = new Date(now);
-      date.setDate(
-        now.getDate() -
-          ((now.getDay() - i - 1 + 7) % 7)
-      );
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 7);
 
-      const dateStr = date.toDateString();
-
-      return {
-        day,
-        commits: (commits ?? []).filter(
-          (c) =>
-            new Date(c.committed_at).toDateString() === dateStr
-        ).length,
-        tasks: Math.floor(Math.random() * 3),
-      };
+    const weeklySessions = (sessions ?? []).filter((session) => {
+      const startedAt = new Date(session.started_at);
+      return startedAt >= weekStart && startedAt < weekEnd;
     });
+
+    const totalCodingMinutes = weeklySessions.reduce(
+      (sum, session) => sum + (session.duration_minutes || 0),
+      0
+    );
+    const totalCodingHours =
+      Math.round((totalCodingMinutes / 60) * 10) / 10;
 
     // =========================
     // SESSION DATA
     // =========================
     const sessionData = days.map((day, i) => {
-      const date = new Date(now);
-      date.setDate(
-        now.getDate() -
-          ((now.getDay() - i - 1 + 7) % 7)
-      );
+      const date = new Date(weekStart);
+      date.setDate(weekStart.getDate() + i);
 
       const dateStr = date.toDateString();
 
-      const daySessions = (sessions ?? []).filter(
+      const daySessions = weeklySessions.filter(
         (s) =>
           new Date(s.started_at).toDateString() === dateStr
       );
@@ -210,8 +211,9 @@ export default function DashboardPage() {
       taskCounts,
       commitCount: commits?.length ?? 0,
       codingStreak: streak,
+      totalCodingHours,
       productivityScore,
-      weeklyData,
+      taskStatusData,
       sessionData,
       recentActivity: (commits ?? [])
         .slice(0, 3)
@@ -383,25 +385,60 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="w-4 h-4" />
+              Coding Hours
+            </CardTitle>
+            <CardDescription>
+              Total tracked this week
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold">
+              {data.totalCodingHours.toFixed(1)}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FolderKanban className="w-4 h-4" />
+              Projects
+            </CardTitle>
+            <CardDescription>
+              Active workspace projects
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold">
+              {data.projectCount}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* CHARTS */}
       <div className="grid md:grid-cols-2 gap-4">
         <Card>
           <CardHeader>
             <CardTitle>
-              Weekly Activity
+              Tasks by Status
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <AreaChart
+            <BarChart
               width={400}
               height={250}
-              data={data.weeklyData}
+              data={data.taskStatusData}
             >
-              <XAxis dataKey="day" />
-              <YAxis />
-              <Area dataKey="commits" />
-              <Area dataKey="tasks" />
-            </AreaChart>
+              <XAxis dataKey="status" />
+              <YAxis allowDecimals={false} />
+              <Bar dataKey="tasks" />
+            </BarChart>
           </CardContent>
         </Card>
 
