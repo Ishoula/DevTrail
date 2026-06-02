@@ -321,17 +321,17 @@ export default function DashboardPage() {
   // =========================
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">
-          Dashboard
-        </h1>
-        <p className="text-muted-foreground">
-          Welcome back! Here&apos;s your overview.
-        </p>
-      </div>
+      {/* GITHUB STATS */}
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            GitHub Stats
+          </CardTitle>
+          <CardDescription>
+            Synced from your GitHub account
+          </CardDescription>
+        </CardHeader>
 
-      {/* TOP CARDS */}
-      <div className="grid gap-4 md:grid-cols-4">
         <CardContent className="space-y-4">
           <Button
             onClick={syncGitHub}
@@ -381,16 +381,7 @@ export default function DashboardPage() {
             </p>
           )}
         </CardContent>
-
-        <Card>
-          <CardContent className="p-4">
-            <p>Projects</p>
-            <h2 className="text-2xl font-bold">
-              {data.projectCount}
-            </h2>
-          </CardContent>
-        </Card>
-      </div>
+      </Card>
 
       {/* CHARTS */}
       <div className="grid md:grid-cols-2 gap-4">
@@ -434,19 +425,7 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* GITHUB */}
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            GitHub Stats
-          </CardTitle>
-          <CardDescription>
-            Synced from your GitHub account
-          </CardDescription>
-        </CardHeader>
-
-        
-      </Card>
+      
     </div>
   );
 }
