@@ -242,7 +242,7 @@ export default function ProjectsPage() {
                   id="name"
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="My Awesome Project"
+                  placeholder="project-backend"
                   className="bg-secondary/50"
                 />
               </div>

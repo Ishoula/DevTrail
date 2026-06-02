@@ -258,6 +258,17 @@ export default function DashboardPage() {
     setSyncResult(null);
 
     try {
+      const { data: sessionData } =
+        await supabase.auth.getSession();
+      const accessToken =
+        sessionData.session?.access_token;
+
+      if (!accessToken) {
+        setSyncResult('No session found');
+        setSyncing(false);
+        return;
+      }
+
       const { data, error } =
         await supabase.functions.invoke(
           'github-sync',
@@ -265,6 +276,9 @@ export default function DashboardPage() {
             body: {
               github_token:
                 user.user_metadata?.github_token,
+            },
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
             },
           }
         );

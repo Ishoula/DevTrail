@@ -47,7 +47,7 @@ export default function SettingsPage() {
   // =========================
   // OAUTH URL
   // =========================
-  const githubOAuthUrl = `https://github.com/login/oauth/authorize?client_id=${process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID}&scope=read:user repo`;
+  const githubOAuthUrl = `https://github.com/login/oauth/authorize?client_id=${process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID}&scope=read:user repo&state=${user?.id ?? ''}`;
 
   // =========================
   // LOAD GITHUB CONNECTION (SOURCE OF TRUTH = SUPABASE USER)
