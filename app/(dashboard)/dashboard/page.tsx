@@ -332,35 +332,55 @@ export default function DashboardPage() {
 
       {/* TOP CARDS */}
       <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardContent className="p-4">
-            <p>Productivity</p>
-            <h2 className="text-2xl font-bold">
-              {data.productivityScore}%
-            </h2>
-            <Progress
-              value={data.productivityScore}
-            />
-          </CardContent>
-        </Card>
+        <CardContent className="space-y-4">
+          <Button
+            onClick={syncGitHub}
+            disabled={syncing}
+          >
+            <Github className="w-4 h-4 mr-2" />
+            {syncing
+              ? 'Syncing...'
+              : 'Sync GitHub'}
+          </Button>
 
-        <Card>
-          <CardContent className="p-4">
-            <p>Commits</p>
-            <h2 className="text-2xl font-bold">
-              {data.commitCount}
-            </h2>
-          </CardContent>
-        </Card>
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="border rounded-lg p-4">
+              <div className="flex items-center gap-2">
+                <Flame className="w-4 h-4 text-orange-500" />
+                <span>Streak</span>
+              </div>
+              <p className="text-2xl font-bold">
+                {githubStreak}
+              </p>
+            </div>
 
-        <Card>
-          <CardContent className="p-4">
-            <p>Streak</p>
-            <h2 className="text-2xl font-bold">
-              {data.codingStreak} days
-            </h2>
-          </CardContent>
-        </Card>
+            <div className="border rounded-lg p-4">
+              <div className="flex items-center gap-2">
+                <GitCommitHorizontal className="w-4 h-4" />
+                <span>Contributions</span>
+              </div>
+              <p className="text-2xl font-bold">
+                {totalContributions}
+              </p>
+            </div>
+
+            <div className="border rounded-lg p-4">
+              <div className="flex items-center gap-2">
+                <FolderKanban className="w-4 h-4" />
+                <span>Repos</span>
+              </div>
+              <p className="text-2xl font-bold">
+                {reposSynced}
+              </p>
+            </div>
+          </div>
+
+          {syncResult && (
+            <p className="text-sm text-muted-foreground">
+              {syncResult}
+            </p>
+          )}
+        </CardContent>
 
         <Card>
           <CardContent className="p-4">
@@ -425,55 +445,7 @@ export default function DashboardPage() {
           </CardDescription>
         </CardHeader>
 
-        <CardContent className="space-y-4">
-          <Button
-            onClick={syncGitHub}
-            disabled={syncing}
-          >
-            <Github className="w-4 h-4 mr-2" />
-            {syncing
-              ? 'Syncing...'
-              : 'Sync GitHub'}
-          </Button>
-
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="border rounded-lg p-4">
-              <div className="flex items-center gap-2">
-                <Flame className="w-4 h-4 text-orange-500" />
-                <span>Streak</span>
-              </div>
-              <p className="text-2xl font-bold">
-                {githubStreak}
-              </p>
-            </div>
-
-            <div className="border rounded-lg p-4">
-              <div className="flex items-center gap-2">
-                <GitCommitHorizontal className="w-4 h-4" />
-                <span>Contributions</span>
-              </div>
-              <p className="text-2xl font-bold">
-                {totalContributions}
-              </p>
-            </div>
-
-            <div className="border rounded-lg p-4">
-              <div className="flex items-center gap-2">
-                <FolderKanban className="w-4 h-4" />
-                <span>Repos</span>
-              </div>
-              <p className="text-2xl font-bold">
-                {reposSynced}
-              </p>
-            </div>
-          </div>
-
-          {syncResult && (
-            <p className="text-sm text-muted-foreground">
-              {syncResult}
-            </p>
-          )}
-        </CardContent>
+        
       </Card>
     </div>
   );
