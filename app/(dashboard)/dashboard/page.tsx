@@ -97,7 +97,7 @@ export default function DashboardPage() {
         updated_at
       `)
       .eq('user_id', user!.id)
-      .single();
+      .maybeSingle();
 
     // =========================
     // TASK PROCESSING
