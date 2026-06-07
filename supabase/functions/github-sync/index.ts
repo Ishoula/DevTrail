@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const Deno = (globalThis as any).Deno;
 
+// ===================== CORS =====================
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -19,6 +20,7 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+// ===================== GITHUB GRAPHQL (contributions) =====================
 async function getContributions(username: string, token: string) {
   const query = `
     query {
@@ -48,7 +50,8 @@ async function getContributions(username: string, token: string) {
   });
 
   const data = await res.json();
-  return data.data.user.contributionsCollection.contributionCalendar;
+
+  return data?.data?.user?.contributionsCollection?.contributionCalendar;
 }
 
 function formatHeatmap(calendar: any) {
@@ -62,25 +65,26 @@ function formatHeatmap(calendar: any) {
 
 function calculateStreak(calendar: any) {
   const days = calendar.weeks.flatMap((w: any) => w.contributionDays);
+
   const sorted = [...days].sort(
     (a: any, b: any) =>
       new Date(a.date).getTime() - new Date(b.date).getTime()
   );
 
   let streak = 0;
+
   for (let i = sorted.length - 1; i >= 0; i--) {
-    if (sorted[i].contributionCount > 0) {
-      streak++;
-    } else {
-      break;
-    }
+    if (sorted[i].contributionCount > 0) streak++;
+    else break;
   }
+
   return streak;
 }
 
-const SESSION_BREAK_MS = 120 * 60 * 1000; // 2 hours
-const INITIAL_BUFFER_MS = 30 * 60 * 1000; // 30 minutes
-const FINAL_BUFFER_MS = 10 * 60 * 1000; // 10 minutes
+// ===================== SESSION LOGIC =====================
+const SESSION_BREAK_MS = 120 * 60 * 1000;
+const INITIAL_BUFFER_MS = 30 * 60 * 1000;
+const FINAL_BUFFER_MS = 10 * 60 * 1000;
 
 interface CommitRow {
   committed_at: string;
@@ -94,52 +98,63 @@ interface CodingSessionRow {
   commit_count: number;
 }
 
-function computeSessions(userId: string, commits: CommitRow[]): CodingSessionRow[] {
-  if (commits.length === 0) return [];
+function computeSessions(
+  userId: string,
+  commits: CommitRow[]
+): CodingSessionRow[] {
+  if (!commits.length) return [];
 
-  const timestamps = commits.map((c) => new Date(c.committed_at).getTime());
+  const timestamps = commits
+    .map((c) => new Date(c.committed_at).getTime())
+    .filter((t) => !isNaN(t))
+    .sort((a, b) => a - b);
+
+  if (!timestamps.length) return [];
 
   const sessions: CodingSessionRow[] = [];
-  let sessionStart = timestamps[0];
-  let sessionEnd = timestamps[0];
-  let commitCount = 1;
+
+  let start = timestamps[0];
+  let end = timestamps[0];
+  let count = 1;
 
   for (let i = 1; i < timestamps.length; i++) {
     const gap = timestamps[i] - timestamps[i - 1];
-    if (gap > SESSION_BREAK_MS) {
 
-      sessions.push(buildSession(userId, sessionStart, sessionEnd, commitCount));
-      sessionStart = timestamps[i];
-      commitCount = 1;
+    if (gap > SESSION_BREAK_MS) {
+      sessions.push(buildSession(userId, start, end, count));
+      start = timestamps[i];
+      count = 1;
     } else {
-      commitCount++;
+      count++;
     }
-    sessionEnd = timestamps[i];
+
+    end = timestamps[i];
   }
-  sessions.push(buildSession(userId, sessionStart, sessionEnd, commitCount));
+
+  sessions.push(buildSession(userId, start, end, count));
 
   return sessions;
 }
 
 function buildSession(
   userId: string,
-  firstCommitMs: number,
-  lastCommitMs: number,
-  commitCount: number
+  first: number,
+  last: number,
+  count: number
 ): CodingSessionRow {
-  const startedMs = firstCommitMs - INITIAL_BUFFER_MS;
-  const endedMs = lastCommitMs + FINAL_BUFFER_MS;
-  const durationMin = Math.round((endedMs - startedMs) / 60_000);
+  const startedMs = first - INITIAL_BUFFER_MS;
+  const endedMs = last + FINAL_BUFFER_MS;
 
   return {
     user_id: userId,
     started_at: new Date(startedMs).toISOString(),
     ended_at: new Date(endedMs).toISOString(),
-    duration_minutes: durationMin,
-    commit_count: commitCount,
+    duration_minutes: Math.round((endedMs - startedMs) / 60000),
+    commit_count: count,
   };
 }
 
+// ===================== MAIN FUNCTION =====================
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -153,8 +168,11 @@ Deno.serve(async (req: Request) => {
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const SUPABASE_SERVICE_KEY = Deno.env.get(
+      "SUPABASE_SERVICE_ROLE_KEY"
+    )!;
 
+    // Auth client
     const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -169,12 +187,14 @@ Deno.serve(async (req: Request) => {
     }
 
     const { github_token } = await req.json();
+
     if (!github_token) {
       return jsonResponse({ error: "Missing GitHub token" }, 400);
     }
 
     const userId = user.id;
 
+    // ===================== GET GITHUB USER =====================
     const githubUserRes = await fetch("https://api.github.com/user", {
       headers: {
         Authorization: `Bearer ${github_token}`,
@@ -194,6 +214,7 @@ Deno.serve(async (req: Request) => {
 
     const username = githubUser.login;
 
+    // ===================== EVENTS =====================
     const eventsRes = await fetch(
       `https://api.github.com/users/${username}/events?per_page=100`,
       {
@@ -207,9 +228,11 @@ Deno.serve(async (req: Request) => {
     const events = await eventsRes.json();
     const pushEvents = events.filter((e: any) => e.type === "PushEvent");
 
+    // ===================== COMMITS =====================
     const commits = pushEvents.flatMap((event: any) => {
       const commitsArray = event.payload?.commits;
       if (!Array.isArray(commitsArray)) return [];
+
       return commitsArray.map((commit: any) => ({
         user_id: userId,
         sha: commit.sha,
@@ -219,6 +242,7 @@ Deno.serve(async (req: Request) => {
       }));
     });
 
+    // ===================== REPOS =====================
     const reposRes = await fetch(
       `https://api.github.com/users/${username}/repos?per_page=100&sort=updated`,
       {
@@ -230,6 +254,7 @@ Deno.serve(async (req: Request) => {
     );
 
     const repos = await reposRes.json();
+
     const repoRecords = repos.map((repo: any) => ({
       user_id: userId,
       repo_id: repo.id,
@@ -241,20 +266,41 @@ Deno.serve(async (req: Request) => {
       updated_at: repo.updated_at,
     }));
 
-    const contributions = await getContributions(username, github_token);
+    // ===================== CONTRIBUTIONS =====================
+    const contributions = await getContributions(
+      username,
+      github_token
+    );
+
     const heatmap = formatHeatmap(contributions);
     const streak = calculateStreak(contributions);
 
+    // ===================== SUPABASE CLIENT =====================
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+    // ===================== SAVE COMMITS =====================
     if (commits.length > 0) {
-      await supabase.from("commits").upsert(commits, { onConflict: "sha" });
+      const { error: commitErr } = await supabase
+        .from("commits")
+        .upsert(commits, { onConflict: "sha" });
+
+      if (commitErr) {
+        console.error("COMMIT UPSERT ERROR:", commitErr);
+      }
     }
 
+    // ===================== SAVE REPOS =====================
     if (repoRecords.length > 0) {
-      await supabase.from("repos").upsert(repoRecords, { onConflict: "repo_id" });
+      const { error: repoErr } = await supabase
+        .from("repos")
+        .upsert(repoRecords, { onConflict: "repo_id" });
+
+      if (repoErr) {
+        console.error("REPO UPSERT ERROR:", repoErr);
+      }
     }
 
+    // ===================== SAVE GITHUB STATS =====================
     await supabase.from("github_stats").upsert(
       {
         user_id: userId,
@@ -267,6 +313,7 @@ Deno.serve(async (req: Request) => {
       { onConflict: "user_id" }
     );
 
+    // ===================== SAVE HEATMAP =====================
     const heatmapRows = heatmap.map((day: any) => ({
       user_id: userId,
       contribution_date: day.date,
@@ -276,42 +323,31 @@ Deno.serve(async (req: Request) => {
     if (heatmapRows.length > 0) {
       await supabase
         .from("github_heatmap")
-        .upsert(heatmapRows, { onConflict: "user_id,contribution_date" });
+        .upsert(heatmapRows, {
+          onConflict: "user_id,contribution_date",
+        });
     }
 
-    const { data: allCommits, error: commitsErr } = await supabase
-      .from("commits")
-      .select("committed_at")
-      .eq("user_id", userId)
-      .order("committed_at", { ascending: true });
-
+    // ===================== COMPUTE + SAVE SESSIONS =====================
     let sessions_synced = 0;
 
-    if (!commitsErr && allCommits && allCommits.length > 0) {
-      const computedSessions = computeSessions(userId, allCommits as CommitRow[]);
+    const computedSessions = computeSessions(userId, commits);
 
-      if (computedSessions.length > 0) {
-        const { error: sessionErr } = await supabase
-          .from("coding_sessions")
-          .upsert(computedSessions, { onConflict: "user_id,started_at" });
+    if (computedSessions.length > 0) {
+      const { error: sessionErr } = await supabase
+        .from("coding_sessions")
+        .upsert(computedSessions, {
+          onConflict: "user_id,started_at",
+        });
 
-        if (sessionErr) {
-          console.error("SESSION UPSERT ERROR:", sessionErr);
-        } else {
-          sessions_synced = computedSessions.length;
-        }
+      if (sessionErr) {
+        console.error("SESSION UPSERT ERROR:", sessionErr);
+      } else {
+        sessions_synced = computedSessions.length;
       }
     }
-    console.log("ALL COMMITS:", allCommits.length);
 
-    const computedSessions = computeSessions(
-      userId,
-      allCommits as CommitRow[]
-    );
-
-    console.log("COMPUTED SESSIONS:");
-    console.log(JSON.stringify(computedSessions, null, 2));
-
+    // ===================== RESPONSE =====================
     return jsonResponse({
       success: true,
       github_user: username,
@@ -325,7 +361,6 @@ Deno.serve(async (req: Request) => {
         total_events: events.length,
       },
     });
-
   } catch (err) {
     console.error("SYNC ERROR:", err);
     return jsonResponse(
