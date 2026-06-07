@@ -199,7 +199,8 @@ export default function DashboardPage() {
       return startedAt >= weekStart && startedAt < weekEnd;
     });
 
-    const totalCodingMinutes = weeklySessions.reduce(
+    // All-time total — weekly filter would return 0 if commits aren't from this week
+    const totalCodingMinutes = (sessions ?? []).reduce(
       (sum, session) => sum + (session.duration_minutes || 0),
       0
     );
@@ -425,7 +426,7 @@ export default function DashboardPage() {
               Coding Hours
             </CardTitle>
             <CardDescription>
-              Total tracked this week
+              All-time estimated from commits
             </CardDescription>
           </CardHeader>
           <CardContent>
