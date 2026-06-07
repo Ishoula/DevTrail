@@ -70,17 +70,13 @@ function formatHeatmap(calendar: any) {
 // STREAK CALCULATION
 // =========================
 function calculateStreak(calendar: any) {
-  const days = calendar.weeks.flatMap(
-    (w: any) => w.contributionDays
-  );
-
+  const days = calendar.weeks.flatMap((w: any) => w.contributionDays);
   const sorted = [...days].sort(
     (a: any, b: any) =>
       new Date(a.date).getTime() - new Date(b.date).getTime()
   );
 
   let streak = 0;
-
   for (let i = sorted.length - 1; i >= 0; i--) {
     if (sorted[i].contributionCount > 0) {
       streak++;
@@ -88,12 +84,83 @@ function calculateStreak(calendar: any) {
       break;
     }
   }
-
   return streak;
 }
 
 // =========================
-// MAIN FUNCTION
+// SESSION GROUPING ALGORITHM
+// =========================
+// Industry-standard heuristics (similar to WakaTime / GitRoll):
+//   - Gap > 120 min between commits → new coding session
+//   - Add 30-min buffer before first commit (user was coding before pushing)
+//   - Add 10-min buffer after last commit (user kept coding after pushing)
+const SESSION_BREAK_MS     = 120 * 60 * 1000; // 2 hours
+const INITIAL_BUFFER_MS    =  30 * 60 * 1000; // 30 minutes
+const FINAL_BUFFER_MS      =  10 * 60 * 1000; // 10 minutes
+
+interface CommitRow {
+  committed_at: string;
+}
+
+interface CodingSessionRow {
+  user_id: string;
+  started_at: string;
+  ended_at: string;
+  duration_minutes: number;
+  commit_count: number;
+}
+
+function computeSessions(userId: string, commits: CommitRow[]): CodingSessionRow[] {
+  if (commits.length === 0) return [];
+
+  // Already sorted ascending by the DB query
+  const timestamps = commits.map((c) => new Date(c.committed_at).getTime());
+
+  const sessions: CodingSessionRow[] = [];
+  let sessionStart   = timestamps[0];
+  let sessionEnd     = timestamps[0];
+  let commitCount    = 1;
+
+  for (let i = 1; i < timestamps.length; i++) {
+    const gap = timestamps[i] - timestamps[i - 1];
+    if (gap > SESSION_BREAK_MS) {
+      // Close current session
+      sessions.push(buildSession(userId, sessionStart, sessionEnd, commitCount));
+      // Start a new one
+      sessionStart = timestamps[i];
+      commitCount  = 1;
+    } else {
+      commitCount++;
+    }
+    sessionEnd = timestamps[i];
+  }
+  // Flush the last open session
+  sessions.push(buildSession(userId, sessionStart, sessionEnd, commitCount));
+
+  return sessions;
+}
+
+function buildSession(
+  userId: string,
+  firstCommitMs: number,
+  lastCommitMs: number,
+  commitCount: number
+): CodingSessionRow {
+  const startedMs  = firstCommitMs - INITIAL_BUFFER_MS;
+  const endedMs    = lastCommitMs  + FINAL_BUFFER_MS;
+  const durationMin = Math.round((endedMs - startedMs) / 60_000);
+
+  return {
+    user_id:          userId,
+    started_at:       new Date(startedMs).toISOString(),
+    ended_at:         new Date(endedMs).toISOString(),
+    duration_minutes: durationMin,
+    commit_count:     commitCount,
+  };
+}
+
+// =========================
+// MAIN HANDLER
 // =========================
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -106,10 +173,11 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: "Missing authorization header" }, 401);
     }
 
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const SUPABASE_URL       = Deno.env.get("SUPABASE_URL")!;
+    const SUPABASE_ANON_KEY  = Deno.env.get("SUPABASE_ANON_KEY")!;
     const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+    // Auth client — verifies the JWT
     const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -166,18 +234,16 @@ Deno.serve(async (req: Request) => {
     );
 
     const events = await eventsRes.json();
-
     const pushEvents = events.filter((e: any) => e.type === "PushEvent");
 
     const commits = pushEvents.flatMap((event: any) => {
       const commitsArray = event.payload?.commits;
       if (!Array.isArray(commitsArray)) return [];
-
       return commitsArray.map((commit: any) => ({
-        user_id: userId,
-        sha: commit.sha,
-        message: commit.message,
-        repository: event.repo?.name || "unknown",
+        user_id:      userId,
+        sha:          commit.sha,
+        message:      commit.message,
+        repository:   event.repo?.name || "unknown",
         committed_at: event.created_at,
       }));
     });
@@ -196,15 +262,14 @@ Deno.serve(async (req: Request) => {
     );
 
     const repos = await reposRes.json();
-
     const repoRecords = repos.map((repo: any) => ({
-      user_id: userId,
-      repo_id: repo.id,
-      name: repo.name,
-      full_name: repo.full_name,
-      language: repo.language,
-      stars: repo.stargazers_count,
-      forks: repo.forks_count,
+      user_id:    userId,
+      repo_id:    repo.id,
+      name:       repo.name,
+      full_name:  repo.full_name,
+      language:   repo.language,
+      stars:      repo.stargazers_count,
+      forks:      repo.forks_count,
       updated_at: repo.updated_at,
     }));
 
@@ -212,34 +277,24 @@ Deno.serve(async (req: Request) => {
     // GET CONTRIBUTIONS (HEATMAP + STREAK)
     // =========================
     const contributions = await getContributions(username, github_token);
+    const heatmap       = formatHeatmap(contributions);
+    const streak        = calculateStreak(contributions);
 
-    const heatmap = formatHeatmap(contributions);
-    const streak = calculateStreak(contributions);
-
-    // =========================
-    // SUPABASE CLIENT (SERVICE ROLE)
-    // =========================
-    const supabase = createClient(
-      SUPABASE_URL,
-      SUPABASE_SERVICE_KEY
-    );
+    // Service-role client — bypasses RLS for writes
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
     // =========================
-    // INSERT COMMITS
+    // UPSERT COMMITS
     // =========================
     if (commits.length > 0) {
-      await supabase.from("commits").upsert(commits, {
-        onConflict: "sha",
-      });
+      await supabase.from("commits").upsert(commits, { onConflict: "sha" });
     }
 
     // =========================
-    // INSERT REPOS
+    // UPSERT REPOS
     // =========================
     if (repoRecords.length > 0) {
-      await supabase.from("repos").upsert(repoRecords, {
-        onConflict: "repo_id",
-      });
+      await supabase.from("repos").upsert(repoRecords, { onConflict: "repo_id" });
     }
 
     // =========================
@@ -247,31 +302,58 @@ Deno.serve(async (req: Request) => {
     // =========================
     await supabase.from("github_stats").upsert(
       {
-        user_id: userId,
-        github_username: username,
+        user_id:              userId,
+        github_username:      username,
         streak,
-        total_contributions: contributions.totalContributions,
-        repos_synced:repoRecords.length,
-        updated_at: new Date().toISOString(),
+        total_contributions:  contributions.totalContributions,
+        repos_synced:         repoRecords.length,
+        updated_at:           new Date().toISOString(),
       },
-      {
-        onConflict: "user_id",
-      }
+      { onConflict: "user_id" }
     );
 
     // =========================
     // SAVE HEATMAP
     // =========================
     const heatmapRows = heatmap.map((day: any) => ({
-      user_id: userId,
-      contribution_date: day.date,
+      user_id:            userId,
+      contribution_date:  day.date,
       contribution_count: day.count,
     }));
 
     if (heatmapRows.length > 0) {
-      await supabase.from("github_heatmap").upsert(heatmapRows, {
-        onConflict: "user_id,contribution_date",
-      });
+      await supabase
+        .from("github_heatmap")
+        .upsert(heatmapRows, { onConflict: "user_id,contribution_date" });
+    }
+
+    // =========================
+    // COMPUTE & PERSIST CODING SESSIONS
+    // Fetch full commit history (not just this batch) so session boundaries
+    // are computed from the complete timeline.
+    // =========================
+    const { data: allCommits, error: commitsErr } = await supabase
+      .from("commits")
+      .select("committed_at")
+      .eq("user_id", userId)
+      .order("committed_at", { ascending: true });
+
+    let sessions_synced = 0;
+
+    if (!commitsErr && allCommits && allCommits.length > 0) {
+      const computedSessions = computeSessions(userId, allCommits as CommitRow[]);
+
+      if (computedSessions.length > 0) {
+        const { error: sessionErr } = await supabase
+          .from("coding_sessions")
+          .upsert(computedSessions, { onConflict: "user_id,started_at" });
+
+        if (sessionErr) {
+          console.error("SESSION UPSERT ERROR:", sessionErr);
+        } else {
+          sessions_synced = computedSessions.length;
+        }
+      }
     }
 
     // =========================
@@ -279,28 +361,22 @@ Deno.serve(async (req: Request) => {
     // =========================
     return jsonResponse({
       success: true,
-      github_user: username,
-
+      github_user:          username,
       streak,
-      total_contributions: contributions.totalContributions,
-      heatmap,
-
-      commits_synced: commits.length,
-      repos_synced: repoRecords.length,
-
+      total_contributions:  contributions.totalContributions,
+      commits_synced:       commits.length,
+      repos_synced:         repoRecords.length,
+      sessions_synced,
       stats: {
-        push_events: pushEvents.length,
+        push_events:  pushEvents.length,
         total_events: events.length,
       },
     });
+
   } catch (err) {
     console.error("SYNC ERROR:", err);
-
     return jsonResponse(
-      {
-        error: "Internal server error",
-        details: String(err),
-      },
+      { error: "Internal server error", details: String(err) },
       500
     );
   }

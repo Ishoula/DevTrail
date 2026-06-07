@@ -1,5 +1,3 @@
-
-
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -21,10 +19,8 @@ import {
   CartesianGrid,
   BarChart,
   Bar,
-  LineChart,
-  Line,
 } from 'recharts';
-import { GitCommitHorizontal, Clock, Flame, TrendingUp } from 'lucide-react';
+import { GitCommitHorizontal, Clock, Flame, TrendingUp, Timer } from 'lucide-react';
 
 const commitChartConfig = {
   commits: { label: 'Commits', color: 'hsl(var(--primary))' },
@@ -38,6 +34,14 @@ const repoChartConfig = {
   count: { label: 'Commits', color: 'hsl(var(--chart-3))' },
 } satisfies ChartConfig;
 
+interface SessionDetail {
+  id: string;
+  started_at: string;
+  ended_at: string;
+  duration_minutes: number;
+  commit_count: number;
+}
+
 interface AnalyticsData {
   totalCommits: number;
   totalHours: number;
@@ -48,25 +52,105 @@ interface AnalyticsData {
   hoursTrend: { date: string; hours: number }[];
   repoBreakdown: { repo: string; count: number }[];
   heatmapData: { day: number; hour: number; value: number }[];
+  recentSessions: SessionDetail[];
+}
+
+/** Format minutes as "Xh Ym" or "Ym" */
+function formatDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+// ── Client-side session grouping (fallback when DB has no persisted sessions) ──
+const SESSION_BREAK_MS  = 120 * 60 * 1000; // 2-hour gap → new session
+const INITIAL_BUFFER_MS =  30 * 60 * 1000; // 30 min before first commit
+const FINAL_BUFFER_MS   =  10 * 60 * 1000; // 10 min after last commit
+
+interface RawCommit { committed_at: string; }
+
+function computeSessionsFromCommits(commits: RawCommit[]): SessionDetail[] {
+  if (commits.length === 0) return [];
+
+  const sorted = [...commits].sort(
+    (a, b) => new Date(a.committed_at).getTime() - new Date(b.committed_at).getTime()
+  );
+  const ts = sorted.map((c) => new Date(c.committed_at).getTime());
+
+  const result: SessionDetail[] = [];
+  let start      = ts[0];
+  let end        = ts[0];
+  let count      = 1;
+  let sessionIdx = 0;
+
+  for (let i = 1; i < ts.length; i++) {
+    if (ts[i] - ts[i - 1] > SESSION_BREAK_MS) {
+      const startedMs = start - INITIAL_BUFFER_MS;
+      const endedMs   = end   + FINAL_BUFFER_MS;
+      result.push({
+        id:               `client-${sessionIdx++}`,
+        started_at:       new Date(startedMs).toISOString(),
+        ended_at:         new Date(endedMs).toISOString(),
+        duration_minutes: Math.round((endedMs - startedMs) / 60_000),
+        commit_count:     count,
+      });
+      start = ts[i];
+      count = 1;
+    } else {
+      count++;
+    }
+    end = ts[i];
+  }
+  // flush last session
+  const startedMs = start - INITIAL_BUFFER_MS;
+  const endedMs   = end   + FINAL_BUFFER_MS;
+  result.push({
+    id:               `client-${sessionIdx}`,
+    started_at:       new Date(startedMs).toISOString(),
+    ended_at:         new Date(endedMs).toISOString(),
+    duration_minutes: Math.round((endedMs - startedMs) / 60_000),
+    commit_count:     count,
+  });
+
+  // Return newest first
+  return result.reverse();
 }
 
 export default function AnalyticsPage() {
   const { user } = useAuth();
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sessionsEstimated, setSessionsEstimated] = useState(false);
 
   useEffect(() => {
     if (!user) return;
     const fetchAnalytics = async () => {
       const [commitsRes, sessionsRes] = await Promise.all([
-        supabase.from('commits').select('*').eq('user_id', user.id).order('committed_at', { ascending: true }),
-        supabase.from('coding_sessions').select('*').eq('user_id', user.id).order('started_at', { ascending: true }),
+        supabase
+          .from('commits')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('committed_at', { ascending: true }),
+        supabase
+          .from('coding_sessions')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('started_at', { ascending: false }), // newest first for the details card
       ]);
 
       const commits = commitsRes.data || [];
-      const sessions = sessionsRes.data || [];
+      // Use persisted sessions if available; otherwise compute from commits client-side
+      let sessions = sessionsRes.data || [];
+      let estimated = false;
+      if (sessions.length === 0 && commits.length > 0) {
+        sessions = computeSessionsFromCommits(commits) as typeof sessions;
+        estimated = true;
+      }
+      setSessionsEstimated(estimated);
 
-      // Commit trend (last 30 days)
+      // ── Commit trend (last 30 days) ──────────────────────────────────────
       const now = new Date();
       const commitTrend = Array.from({ length: 30 }, (_, i) => {
         const date = new Date(now);
@@ -74,23 +158,31 @@ export default function AnalyticsPage() {
         const dateStr = date.toISOString().split('T')[0];
         return {
           date: date.toLocaleDateString('en', { month: 'short', day: 'numeric' }),
-          commits: commits.filter((c) => new Date(c.committed_at).toISOString().split('T')[0] === dateStr).length,
+          commits: commits.filter(
+            (c) => new Date(c.committed_at).toISOString().split('T')[0] === dateStr
+          ).length,
         };
       });
 
-      // Hours trend
+      // ── Hours trend (last 30 days) ────────────────────────────────────────
+      // sessions are in descending order; filter per-day using started_at
       const hoursTrend = Array.from({ length: 30 }, (_, i) => {
         const date = new Date(now);
         date.setDate(now.getDate() - (29 - i));
         const dateStr = date.toDateString();
-        const daySessions = sessions.filter((s) => new Date(s.started_at).toDateString() === dateStr);
+        const daySessions = sessions.filter(
+          (s) => new Date(s.started_at).toDateString() === dateStr
+        );
         return {
           date: date.toLocaleDateString('en', { month: 'short', day: 'numeric' }),
-          hours: Math.round((daySessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0) / 60) * 10) / 10,
+          hours:
+            Math.round(
+              (daySessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0) / 60) * 10
+            ) / 10,
         };
       });
 
-      // Repo breakdown
+      // ── Repo breakdown ───────────────────────────────────────────────────
       const repoMap = new Map<string, number>();
       commits.forEach((c) => {
         const repo = c.repository || 'unknown';
@@ -101,10 +193,11 @@ export default function AnalyticsPage() {
         .sort((a, b) => b.count - a.count)
         .slice(0, 8);
 
-      // Streaks
-      const commitDates = Array.from(new Set(commits.map((c) => new Date(c.committed_at).toDateString()))).sort(
-        (a, b) => new Date(b).getTime() - new Date(a).getTime()
-      );
+      // ── Streaks ──────────────────────────────────────────────────────────
+      const commitDates = Array.from(
+        new Set(commits.map((c) => new Date(c.committed_at).toDateString()))
+      ).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+
       let currentStreak = 0;
       for (let i = 0; i < commitDates.length; i++) {
         const expected = new Date(now);
@@ -117,10 +210,10 @@ export default function AnalyticsPage() {
       }
 
       let longestStreak = 0;
-      let tempStreak = 1;
+      let tempStreak    = 1;
       for (let i = 1; i < commitDates.length; i++) {
-        const prev = new Date(commitDates[i - 1]);
-        const curr = new Date(commitDates[i]);
+        const prev     = new Date(commitDates[i - 1]);
+        const curr     = new Date(commitDates[i]);
         const diffDays = Math.round((prev.getTime() - curr.getTime()) / (1000 * 60 * 60 * 24));
         if (diffDays === 1) {
           tempStreak++;
@@ -131,7 +224,7 @@ export default function AnalyticsPage() {
       }
       longestStreak = Math.max(longestStreak, currentStreak, commitDates.length > 0 ? 1 : 0);
 
-      // Heatmap: day of week x hour of day
+      // ── Heatmap (day-of-week × hour-of-day) ─────────────────────────────
       const heatmapData: { day: number; hour: number; value: number }[] = [];
       for (let day = 0; day < 7; day++) {
         for (let hour = 0; hour < 24; hour++) {
@@ -143,8 +236,23 @@ export default function AnalyticsPage() {
         }
       }
 
-      const totalHours = Math.round((sessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0) / 60) * 10) / 10;
-      const avgDailyCommits = commits.length > 0 ? Math.round((commits.length / 30) * 10) / 10 : 0;
+      // ── All-time totals ──────────────────────────────────────────────────
+      const totalHours =
+        Math.round(
+          (sessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0) / 60) * 10
+        ) / 10;
+
+      const avgDailyCommits =
+        commits.length > 0 ? Math.round((commits.length / 30) * 10) / 10 : 0;
+
+      // ── Recent sessions (newest 10) ──────────────────────────────────────
+      const recentSessions: SessionDetail[] = sessions.slice(0, 10).map((s) => ({
+        id:               s.id,
+        started_at:       s.started_at,
+        ended_at:         s.ended_at,
+        duration_minutes: s.duration_minutes,
+        commit_count:     s.commit_count,
+      }));
 
       setData({
         totalCommits: commits.length,
@@ -156,6 +264,7 @@ export default function AnalyticsPage() {
         hoursTrend,
         repoBreakdown,
         heatmapData,
+        recentSessions,
       });
       setLoading(false);
     };
@@ -190,6 +299,7 @@ export default function AnalyticsPage() {
         <p className="text-muted-foreground">Your productivity insights</p>
       </div>
 
+      {/* ── Stat cards ─────────────────────────────────────────────────── */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="border-border/50">
           <CardContent className="p-4 sm:p-6">
@@ -204,11 +314,12 @@ export default function AnalyticsPage() {
             </div>
           </CardContent>
         </Card>
+
         <Card className="border-border/50">
           <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between">
               <div className="min-w-0">
-                <p className="text-sm text-muted-foreground">Coding Hours</p>
+                <p className="text-sm text-muted-foreground">Total Coding Hours</p>
                 <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.totalHours}h</p>
               </div>
               <div className="h-12 w-12 rounded-lg bg-emerald-500/10 flex items-center justify-center">
@@ -217,12 +328,16 @@ export default function AnalyticsPage() {
             </div>
           </CardContent>
         </Card>
+
         <Card className="border-border/50">
           <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between">
               <div className="min-w-0">
                 <p className="text-sm text-muted-foreground">Current Streak</p>
-                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.currentStreak} <span className="text-base font-normal text-muted-foreground">days</span></p>
+                <p className="mt-1 text-2xl font-bold sm:text-3xl">
+                  {data.currentStreak}{' '}
+                  <span className="text-base font-normal text-muted-foreground">days</span>
+                </p>
               </div>
               <div className="h-12 w-12 rounded-lg bg-orange-500/10 flex items-center justify-center">
                 <Flame className="h-6 w-6 text-orange-500" />
@@ -230,6 +345,7 @@ export default function AnalyticsPage() {
             </div>
           </CardContent>
         </Card>
+
         <Card className="border-border/50">
           <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between">
@@ -245,6 +361,7 @@ export default function AnalyticsPage() {
         </Card>
       </div>
 
+      {/* ── Charts row 1 ───────────────────────────────────────────────── */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="overflow-hidden border-border/50">
           <CardHeader>
@@ -269,7 +386,7 @@ export default function AnalyticsPage() {
         <Card className="overflow-hidden border-border/50">
           <CardHeader>
             <CardTitle className="text-base">Coding Hours</CardTitle>
-            <CardDescription>Estimated hours per day</CardDescription>
+            <CardDescription>Estimated hours per day (last 30 days)</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="scrollbar-chart -mx-2 overflow-x-auto pb-3 sm:mx-0">
@@ -287,6 +404,7 @@ export default function AnalyticsPage() {
         </Card>
       </div>
 
+      {/* ── Charts row 2 ───────────────────────────────────────────────── */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="overflow-hidden border-border/50">
           <CardHeader>
@@ -330,16 +448,17 @@ export default function AnalyticsPage() {
                     <span className="w-7 text-[9px] text-muted-foreground">{day}</span>
                     <div className="flex gap-0.5">
                       {Array.from({ length: 24 }, (_, hour) => {
-                        const entry = data.heatmapData.find((d) => d.day === dayIdx && d.hour === hour);
+                        const entry     = data.heatmapData.find((d) => d.day === dayIdx && d.hour === hour);
                         const intensity = entry ? entry.value / maxHeatmap : 0;
                         return (
                           <div
                             key={hour}
                             className="h-4 w-6 rounded-sm"
                             style={{
-                              backgroundColor: intensity > 0
-                                ? `rgba(59, 130, 246, ${0.2 + intensity * 0.8})`
-                                : 'hsl(var(--secondary))',
+                              backgroundColor:
+                                intensity > 0
+                                  ? `rgba(59, 130, 246, ${0.2 + intensity * 0.8})`
+                                  : 'hsl(var(--secondary))',
                             }}
                           />
                         );
@@ -353,6 +472,7 @@ export default function AnalyticsPage() {
         </Card>
       </div>
 
+      {/* ── Streak history ──────────────────────────────────────────────── */}
       <Card className="border-border/50">
         <CardHeader>
           <CardTitle className="text-base">Streak History</CardTitle>
@@ -375,6 +495,73 @@ export default function AnalyticsPage() {
               <p className="text-xs text-muted-foreground">Avg/Day</p>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Session details ─────────────────────────────────────────────── */}
+      <Card className="border-border/50">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Timer className="h-4 w-4 text-emerald-500" />
+            Coding Sessions
+            {sessionsEstimated && (
+              <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground ml-1">
+                estimated
+              </Badge>
+            )}
+          </CardTitle>
+          <CardDescription>
+            {sessionsEstimated
+              ? 'Computed from your commit history — sync GitHub to persist sessions'
+              : 'Inferred from commit timestamps — sessions separated by >2 h of inactivity'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {data.recentSessions.length === 0 ? (
+            <div className="py-8 text-center space-y-1">
+              <p className="text-sm text-muted-foreground">No sessions computed yet.</p>
+              <p className="text-xs text-muted-foreground">Sync your GitHub commits to generate session estimates.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {data.recentSessions.map((session) => {
+                const start = new Date(session.started_at);
+                const dateLabel = start.toLocaleDateString('en', {
+                  weekday: 'short',
+                  month:   'short',
+                  day:     'numeric',
+                });
+                const timeLabel = start.toLocaleTimeString('en', {
+                  hour:   '2-digit',
+                  minute: '2-digit',
+                });
+                return (
+                  <div
+                    key={session.id}
+                    className="flex items-center justify-between rounded-lg border border-border/50 px-4 py-3 text-sm"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="h-8 w-8 rounded-md bg-emerald-500/10 flex items-center justify-center shrink-0">
+                        <Clock className="h-4 w-4 text-emerald-500" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{dateLabel}</p>
+                        <p className="text-xs text-muted-foreground">Started {timeLabel}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0 ml-4">
+                      <Badge variant="secondary" className="font-mono text-xs">
+                        {formatDuration(session.duration_minutes)}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">
+                        {session.commit_count} commit{session.commit_count !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

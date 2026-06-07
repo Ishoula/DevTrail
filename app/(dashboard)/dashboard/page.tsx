@@ -71,17 +71,49 @@ export default function DashboardPage() {
       .select('status, project_id')
       .in('project_id', projectIds.length ? projectIds : ['__none__']);
 
-    const { data: commits } = await supabase
+    const { data: rawCommits } = await supabase
       .from('commits')
       .select('committed_at')
       .eq('user_id', user!.id)
-      .order('committed_at', { ascending: false })
-      .limit(100);
+      .order('committed_at', { ascending: true });
 
-    const { data: sessions } = await supabase
+    const { data: dbSessions } = await supabase
       .from('coding_sessions')
       .select('duration_minutes, started_at')
       .eq('user_id', user!.id);
+
+    // ── Client-side session fallback ──
+    // If no persisted sessions exist yet (migration/redeploy pending),
+    // compute sessions from commits directly in the browser.
+    const SESSION_BREAK_MS  = 120 * 60 * 1000;
+    const INITIAL_BUFFER_MS =  30 * 60 * 1000;
+    const FINAL_BUFFER_MS   =  10 * 60 * 1000;
+
+    function computeWeeklySessions(commitRows: { committed_at: string }[]) {
+      if (commitRows.length === 0) return [];
+      const ts = commitRows.map((c) => new Date(c.committed_at).getTime());
+      const result: { duration_minutes: number; started_at: string }[] = [];
+      let start = ts[0], end = ts[0], count = 1;
+      for (let i = 1; i < ts.length; i++) {
+        if (ts[i] - ts[i - 1] > SESSION_BREAK_MS) {
+          const s = start - INITIAL_BUFFER_MS, e = end + FINAL_BUFFER_MS;
+          result.push({ started_at: new Date(s).toISOString(), duration_minutes: Math.round((e - s) / 60_000) });
+          start = ts[i]; count = 1;
+        } else { count++; }
+        end = ts[i];
+      }
+      const s = start - INITIAL_BUFFER_MS, e = end + FINAL_BUFFER_MS;
+      result.push({ started_at: new Date(s).toISOString(), duration_minutes: Math.round((e - s) / 60_000) });
+      return result;
+    }
+
+    const sessions =
+      (dbSessions && dbSessions.length > 0)
+        ? dbSessions
+        : computeWeeklySessions(rawCommits ?? []);
+
+    // Keep the last-100 commits for streak / recent-activity (descending)
+    const commits = [...(rawCommits ?? [])].reverse().slice(0, 100);
 
     // =========================
     // GITHUB STATS ONLY
