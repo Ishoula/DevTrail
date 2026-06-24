@@ -21,6 +21,7 @@ import {
   YAxis,
   BarChart,
   Bar,
+  ResponsiveContainer,
 } from 'recharts';
 import { Button } from '@/components/ui/button';
 import { Github } from 'lucide-react';
@@ -459,42 +460,42 @@ export default function DashboardPage() {
       </div>
 
       {/* CHARTS */}
-      <div className="grid md:grid-cols-2 gap-4">
-        <Card>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="min-w-0">
           <CardHeader>
             <CardTitle>
               Tasks by Status
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <BarChart
-              width={400}
-              height={250}
-              data={data.taskStatusData}
-            >
-              <XAxis dataKey="status" />
-              <YAxis allowDecimals={false} />
-              <Bar dataKey="tasks" />
-            </BarChart>
+          <CardContent className="min-w-0">
+            <div className="h-[250px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={data.taskStatusData}>
+                  <XAxis dataKey="status" />
+                  <YAxis allowDecimals={false} />
+                  <Bar dataKey="tasks" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="min-w-0">
           <CardHeader>
             <CardTitle>
               Coding Hours
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <BarChart
-              width={400}
-              height={250}
-              data={data.sessionData}
-            >
-              <XAxis dataKey="day" />
-              <YAxis />
-              <Bar dataKey="hours" />
-            </BarChart>
+          <CardContent className="min-w-0">
+            <div className="h-[250px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={data.sessionData}>
+                  <XAxis dataKey="day" />
+                  <YAxis />
+                  <Bar dataKey="hours" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </CardContent>
         </Card>
       </div>
