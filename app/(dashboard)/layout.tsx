@@ -33,7 +33,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background overflow-x-clip">
       {/* Desktop sidebar */}
       <div className="hidden lg:block">
         <Sidebar />
@@ -49,7 +49,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       )}
 
-      <div className="lg:pl-64 transition-all duration-300">
+      <div className="lg:pl-64 transition-all duration-300 min-w-0">
         {/* Mobile menu button */}
         <div className="lg:hidden fixed top-0 left-0 z-30 h-16 flex items-center px-4 bg-card/80 backdrop-blur-sm border-b border-border/50 w-full">
           <Button
@@ -68,7 +68,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="hidden lg:block">
           <Topbar />
         </div>
-        <main className="p-4 lg:p-6 mt-16 lg:mt-0">{children}</main>
+        <main className="p-4 lg:p-6 mt-16 lg:mt-0 min-w-0">{children}</main>
       </div>
     </div>
   );

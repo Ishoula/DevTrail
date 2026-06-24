@@ -473,7 +473,7 @@ export default function DashboardPage() {
                 <BarChart data={data.taskStatusData}>
                   <XAxis dataKey="status" />
                   <YAxis allowDecimals={false} />
-                  <Bar dataKey="tasks" />
+                  <Bar dataKey="tasks" fill="hsl(var(--primary))" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -492,7 +492,7 @@ export default function DashboardPage() {
                 <BarChart data={data.sessionData}>
                   <XAxis dataKey="day" />
                   <YAxis />
-                  <Bar dataKey="hours" />
+                  <Bar dataKey="hours" fill="hsl(var(--primary))" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
