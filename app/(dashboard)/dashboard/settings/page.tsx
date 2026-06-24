@@ -13,8 +13,9 @@ import {
 } from '@/components/ui/card';
 
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Github, User, Key } from 'lucide-react';
+import { Github, User, Key, Timer } from 'lucide-react';
 
 // =========================
 // TYPES
@@ -34,13 +35,26 @@ interface GitHubSyncResponse {
   error?: string;
 }
 
+interface WakaTimeSyncResponse {
+  success?: boolean;
+  total_seconds?: number;
+  total_hours?: number;
+  days_synced?: number;
+  error?: string;
+  details?: string;
+}
+
 export default function SettingsPage() {
   const { user } = useAuth();
 
   const [githubToken, setGithubToken] = useState('');
   const [githubConnected, setGithubConnected] = useState(false);
+  const [wakatimeApiKey, setWakatimeApiKey] = useState('');
+  const [wakatimeConnected, setWakatimeConnected] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [wakatimeSyncing, setWakatimeSyncing] = useState(false);
+  const [wakatimeSyncResult, setWakatimeSyncResult] = useState<string | null>(null);
   const [heatmap, setHeatmap] = useState<HeatmapDay[]>([]);
   const [appOrigin, setAppOrigin] = useState('');
 
@@ -70,6 +84,7 @@ export default function SettingsPage() {
     if (!user) return;
 
     const token = user.user_metadata?.github_token;
+    const wakatimeKey = user.user_metadata?.wakatime_api_key;
 
     if (token) {
       setGithubToken(token);
@@ -79,6 +94,12 @@ export default function SettingsPage() {
       syncGitHub(token);
     } else {
       setGithubConnected(false);
+    }
+
+    if (wakatimeKey) {
+      setWakatimeConnected(true);
+    } else {
+      setWakatimeConnected(false);
     }
   }, [user]);
 
@@ -141,6 +162,72 @@ export default function SettingsPage() {
   };
 
   // =========================
+  // WAKATIME FUNCTIONS
+  // =========================
+  const saveWakaTimeKey = async () => {
+    if (!wakatimeApiKey.trim()) {
+      setWakatimeSyncResult('Paste your WakaTime API key first.');
+      return;
+    }
+
+    const { error } = await supabase.auth.updateUser({
+      data: {
+        wakatime_api_key: wakatimeApiKey.trim(),
+      },
+    });
+
+    if (error) {
+      setWakatimeSyncResult(error.message);
+      return;
+    }
+
+    setWakatimeApiKey('');
+    setWakatimeConnected(true);
+    setWakatimeSyncResult('WakaTime key saved.');
+  };
+
+  const syncWakaTime = async () => {
+    setWakatimeSyncing(true);
+    setWakatimeSyncResult(null);
+
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      const accessToken = session.session?.access_token;
+
+      if (!accessToken) {
+        setWakatimeSyncResult('No session found');
+        return;
+      }
+
+      const { data, error } = await supabase.functions.invoke<WakaTimeSyncResponse>(
+        'wakatime-sync',
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      if (error) {
+        setWakatimeSyncResult(error.message);
+        return;
+      }
+
+      if (data?.success) {
+        setWakatimeSyncResult(
+          `Synced ${data.days_synced ?? 0} days • ${data.total_hours ?? 0} hours`
+        );
+      } else {
+        setWakatimeSyncResult(data?.error || data?.details || 'Sync failed');
+      }
+    } catch {
+      setWakatimeSyncResult('Unexpected error occurred');
+    } finally {
+      setWakatimeSyncing(false);
+    }
+  };
+
+  // =========================
   // UI
   // =========================
   return (
@@ -157,6 +244,11 @@ export default function SettingsPage() {
           <TabsTrigger value="github">
             <Github className="w-4 h-4 mr-2" />
             GitHub
+          </TabsTrigger>
+
+          <TabsTrigger value="wakatime">
+            <Timer className="w-4 h-4 mr-2" />
+            WakaTime
           </TabsTrigger>
 
           <TabsTrigger value="security">
@@ -227,6 +319,62 @@ export default function SettingsPage() {
               {heatmap.length > 0 && (
                 <p className="text-xs text-muted-foreground">
                   Heatmap loaded: {heatmap.length} active days
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ================= WAKATIME ================= */}
+        <TabsContent value="wakatime">
+          <Card>
+            <CardHeader>
+              <CardTitle>WakaTime Integration</CardTitle>
+              <CardDescription>
+                Pull coding hours from your WakaTime account
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <div className="flex items-center gap-2 text-sm">
+                <div
+                  className={`h-2 w-2 rounded-full ${
+                    wakatimeConnected ? 'bg-green-500' : 'bg-gray-400'
+                  }`}
+                />
+                {wakatimeConnected ? 'Connected' : 'Not connected'}
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="wakatime-key" className="text-sm font-medium">
+                  WakaTime API key
+                </label>
+                <Input
+                  id="wakatime-key"
+                  type="password"
+                  value={wakatimeApiKey}
+                  onChange={(e) => setWakatimeApiKey(e.target.value)}
+                  placeholder="Paste your WakaTime API key"
+                  className="bg-secondary/50"
+                />
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={saveWakaTimeKey}>
+                  Save WakaTime Key
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={syncWakaTime}
+                  disabled={wakatimeSyncing || !wakatimeConnected}
+                >
+                  {wakatimeSyncing ? 'Syncing...' : 'Sync WakaTime'}
+                </Button>
+              </div>
+
+              {wakatimeSyncResult && (
+                <p className="text-sm text-muted-foreground">
+                  {wakatimeSyncResult}
                 </p>
               )}
             </CardContent>

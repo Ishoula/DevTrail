@@ -1,6 +1,6 @@
 # DevTrack
 
-DevTrack is a developer productivity dashboard for tracking projects, tasks, GitHub contribution activity, coding sessions, and weekly momentum. It ships with a public landing page, Supabase-backed authentication, protected dashboard routes, Kanban task management, analytics, and GitHub sync through a Supabase Edge Function.
+DevTrack is a developer productivity dashboard for tracking projects, tasks, GitHub contribution activity, WakaTime coding hours, and weekly momentum. It ships with a public landing page, Supabase-backed authentication, protected dashboard routes, Kanban task management, analytics, and GitHub and WakaTime sync through Supabase Edge Functions.
 
 ## Features
 
@@ -10,7 +10,8 @@ DevTrack is a developer productivity dashboard for tracking projects, tasks, Git
 - Project management with create, edit, archive, and delete flows
 - Kanban task board with project, priority, status, and due-date fields
 - GitHub Personal Access Token sync through a Supabase Edge Function
-- Productivity dashboard for commits, coding streaks, tasks, and coding hours
+- WakaTime API key sync for coding hours and daily activity
+- Productivity dashboard for commits, coding streaks, tasks, and WakaTime coding hours
 - Analytics views for contribution and productivity trends
 - Profile, notification, password, and GitHub integration settings
 - Dark UI built with Tailwind CSS, shadcn/ui, Radix UI, and lucide-react
@@ -49,6 +50,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` is also supported as a fallback for the anon key.
+
+GitHub and WakaTime credentials are saved in Supabase auth metadata from the Settings page, so they do not need to be added as public environment variables.
 
 ### Run Locally
 
@@ -106,6 +109,7 @@ The function expects these Supabase runtime secrets:
 - `SUPABASE_SERVICE_ROLE_KEY`
 
 Users connect GitHub from `Dashboard > Settings > GitHub` with a Personal Access Token using the `repo` and `read:user` scopes.
+Users connect WakaTime from `Dashboard > Settings > WakaTime` with their WakaTime API key.
 
 ## Available Scripts
 
@@ -138,6 +142,7 @@ lib/
   utils.ts                Shared utilities
 supabase/
   functions/github-sync/  GitHub contribution sync Edge Function
+  functions/wakatime-sync/ WakaTime coding-hours sync Edge Function
   migrations/             Database schema and RLS policies
 ```
 
@@ -164,7 +169,7 @@ For deployment:
 1. Connect the repository to Vercel.
 2. Add the Supabase environment variables in the Vercel project settings.
 3. Apply the Supabase migrations.
-4. Deploy the `github-sync` Edge Function with the Supabase CLI.
+4. Deploy the `github-sync` and `wakatime-sync` Edge Functions with the Supabase CLI.
 5. Let Vercel build and deploy the Next.js app.
 
 ## Development Notes
@@ -174,3 +179,4 @@ For deployment:
 - Password reset uses `supabase.auth.resetPasswordForEmail()` and redirects back to `/reset-password`.
 - GitHub tokens are currently saved in Supabase user metadata from the client. For production, move token storage to a server-controlled encrypted secret flow.
 - Some dashboard metrics depend on synced GitHub data, so a new account may show empty charts until GitHub sync runs.
+- Coding hours are sourced from WakaTime summaries after the user saves a WakaTime API key in Settings.

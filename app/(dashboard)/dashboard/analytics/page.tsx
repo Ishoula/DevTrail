@@ -39,7 +39,6 @@ interface SessionDetail {
   started_at: string;
   ended_at: string;
   duration_minutes: number;
-  commit_count: number;
 }
 
 interface AnalyticsData {
@@ -64,69 +63,28 @@ function formatDuration(minutes: number): string {
   return `${h}h ${m}m`;
 }
 
-// ── Client-side session grouping (fallback when DB has no persisted sessions) ──
-const SESSION_BREAK_MS  = 120 * 60 * 1000; // 2-hour gap → new session
-const INITIAL_BUFFER_MS =  30 * 60 * 1000; // 30 min before first commit
-const FINAL_BUFFER_MS   =  10 * 60 * 1000; // 10 min after last commit
-
-interface RawCommit { committed_at: string; }
-
-function computeSessionsFromCommits(commits: RawCommit[]): SessionDetail[] {
-  if (commits.length === 0) return [];
-
-  const sorted = [...commits].sort(
-    (a, b) => new Date(a.committed_at).getTime() - new Date(b.committed_at).getTime()
-  );
-  const ts = sorted.map((c) => new Date(c.committed_at).getTime());
-
-  const result: SessionDetail[] = [];
-  let start      = ts[0];
-  let end        = ts[0];
-  let count      = 1;
-  let sessionIdx = 0;
-
-  for (let i = 1; i < ts.length; i++) {
-    if (ts[i] - ts[i - 1] > SESSION_BREAK_MS) {
-      const startedMs = start - INITIAL_BUFFER_MS;
-      const endedMs   = end   + FINAL_BUFFER_MS;
-      result.push({
-        id:               `client-${sessionIdx++}`,
-        started_at:       new Date(startedMs).toISOString(),
-        ended_at:         new Date(endedMs).toISOString(),
-        duration_minutes: Math.round((endedMs - startedMs) / 60_000),
-        commit_count:     count,
-      });
-      start = ts[i];
-      count = 1;
-    } else {
-      count++;
-    }
-    end = ts[i];
-  }
-  // flush last session
-  const startedMs = start - INITIAL_BUFFER_MS;
-  const endedMs   = end   + FINAL_BUFFER_MS;
-  result.push({
-    id:               `client-${sessionIdx}`,
-    started_at:       new Date(startedMs).toISOString(),
-    ended_at:         new Date(endedMs).toISOString(),
-    duration_minutes: Math.round((endedMs - startedMs) / 60_000),
-    commit_count:     count,
-  });
-
-  // Return newest first
-  return result.reverse();
-}
-
 export default function AnalyticsPage() {
   const { user } = useAuth();
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [sessionsEstimated, setSessionsEstimated] = useState(false);
 
   useEffect(() => {
     if (!user) return;
     const fetchAnalytics = async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (user.user_metadata?.wakatime_api_key && accessToken) {
+        const { error } = await supabase.functions.invoke('wakatime-sync', {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+
+        if (error) {
+          console.error('Failed to sync WakaTime data:', error);
+        }
+      }
+
       const [commitsRes, sessionsRes] = await Promise.all([
         supabase
           .from('commits')
@@ -141,14 +99,7 @@ export default function AnalyticsPage() {
       ]);
 
       const commits = commitsRes.data || [];
-      // Use persisted sessions if available; otherwise compute from commits client-side
-      let sessions = sessionsRes.data || [];
-      let estimated = false;
-      if (sessions.length === 0 && commits.length > 0) {
-        sessions = computeSessionsFromCommits(commits) as typeof sessions;
-        estimated = true;
-      }
-      setSessionsEstimated(estimated);
+      const sessions = sessionsRes.data || [];
 
       // ── Commit trend (last 30 days) ──────────────────────────────────────
       const now = new Date();
@@ -165,7 +116,6 @@ export default function AnalyticsPage() {
       });
 
       // ── Hours trend (last 30 days) ────────────────────────────────────────
-      // sessions are in descending order; filter per-day using started_at
       const hoursTrend = Array.from({ length: 30 }, (_, i) => {
         const date = new Date(now);
         date.setDate(now.getDate() - (29 - i));
@@ -251,7 +201,6 @@ export default function AnalyticsPage() {
         started_at:       s.started_at,
         ended_at:         s.ended_at,
         duration_minutes: s.duration_minutes,
-        commit_count:     s.commit_count,
       }));
 
       setData({
@@ -319,9 +268,9 @@ export default function AnalyticsPage() {
           <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between">
               <div className="min-w-0">
-                <p className="text-sm text-muted-foreground">Total Coding Hours</p>
-                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.totalHours}h</p>
-              </div>
+              <p className="text-sm text-muted-foreground">Total Coding Hours</p>
+              <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.totalHours}h</p>
+            </div>
               <div className="h-12 w-12 rounded-lg bg-emerald-500/10 flex items-center justify-center">
                 <Clock className="h-6 w-6 text-emerald-500" />
               </div>
@@ -386,7 +335,7 @@ export default function AnalyticsPage() {
         <Card className="overflow-hidden border-border/50">
           <CardHeader>
             <CardTitle className="text-base">Coding Hours</CardTitle>
-            <CardDescription>Estimated hours per day (last 30 days)</CardDescription>
+            <CardDescription>Daily hours from WakaTime (last 30 days)</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="scrollbar-chart -mx-2 overflow-x-auto pb-3 sm:mx-0">
@@ -503,24 +452,17 @@ export default function AnalyticsPage() {
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <Timer className="h-4 w-4 text-emerald-500" />
-            Coding Sessions
-            {sessionsEstimated && (
-              <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground ml-1">
-                estimated
-              </Badge>
-            )}
+            Coding Activity
           </CardTitle>
           <CardDescription>
-            {sessionsEstimated
-              ? 'Computed from your commit history — sync GitHub to persist sessions'
-              : 'Inferred from commit timestamps — sessions separated by >2 h of inactivity'}
+            Daily coding time synced from WakaTime
           </CardDescription>
         </CardHeader>
         <CardContent>
           {data.recentSessions.length === 0 ? (
             <div className="py-8 text-center space-y-1">
-              <p className="text-sm text-muted-foreground">No sessions computed yet.</p>
-              <p className="text-xs text-muted-foreground">Sync your GitHub commits to generate session estimates.</p>
+              <p className="text-sm text-muted-foreground">No WakaTime data synced yet.</p>
+              <p className="text-xs text-muted-foreground">Save your WakaTime API key in Settings, then sync.</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -553,9 +495,9 @@ export default function AnalyticsPage() {
                       <Badge variant="secondary" className="font-mono text-xs">
                         {formatDuration(session.duration_minutes)}
                       </Badge>
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">
-                        {session.commit_count} commit{session.commit_count !== 1 ? 's' : ''}
-                      </span>
+                      <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
+                        WakaTime
+                      </Badge>
                     </div>
                   </div>
                 );

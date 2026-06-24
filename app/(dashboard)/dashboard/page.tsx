@@ -60,6 +60,22 @@ export default function DashboardPage() {
   // FETCH DASHBOARD DATA
   // =========================
   async function fetchDashboard() {
+    const { data: authSessionData } = await supabase.auth.getSession();
+    const accessToken = authSessionData.session?.access_token;
+    const hasWakaTimeKey = Boolean(user?.user_metadata?.wakatime_api_key);
+
+    if (hasWakaTimeKey && accessToken) {
+      const { error } = await supabase.functions.invoke('wakatime-sync', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (error) {
+        console.error('Failed to sync WakaTime data:', error);
+      }
+    }
+
     const { data: projects } = await supabase
       .from('projects')
       .select('id, name, status')
@@ -87,35 +103,7 @@ export default function DashboardPage() {
       .select('duration_minutes, started_at')
       .eq('user_id', user!.id);
 
-    // ── Client-side session fallback ──
-    // If no persisted sessions exist yet (migration/redeploy pending),
-    // compute sessions from commits directly in the browser.
-    const SESSION_BREAK_MS  = 120 * 60 * 1000;
-    const INITIAL_BUFFER_MS =  30 * 60 * 1000;
-    const FINAL_BUFFER_MS   =  10 * 60 * 1000;
-
-    function computeWeeklySessions(commitRows: { committed_at: string }[]) {
-      if (commitRows.length === 0) return [];
-      const ts = commitRows.map((c) => new Date(c.committed_at).getTime());
-      const result: { duration_minutes: number; started_at: string }[] = [];
-      let start = ts[0], end = ts[0], count = 1;
-      for (let i = 1; i < ts.length; i++) {
-        if (ts[i] - ts[i - 1] > SESSION_BREAK_MS) {
-          const s = start - INITIAL_BUFFER_MS, e = end + FINAL_BUFFER_MS;
-          result.push({ started_at: new Date(s).toISOString(), duration_minutes: Math.round((e - s) / 60_000) });
-          start = ts[i]; count = 1;
-        } else { count++; }
-        end = ts[i];
-      }
-      const s = start - INITIAL_BUFFER_MS, e = end + FINAL_BUFFER_MS;
-      result.push({ started_at: new Date(s).toISOString(), duration_minutes: Math.round((e - s) / 60_000) });
-      return result;
-    }
-
-    const sessions =
-      (dbSessions && dbSessions.length > 0)
-        ? dbSessions
-        : computeWeeklySessions(rawCommits ?? []);
+    const sessions = dbSessions ?? [];
 
     // Keep the last-100 commits for streak / recent-activity (descending)
     const commits = [...(rawCommits ?? [])].reverse().slice(0, 100);
@@ -204,7 +192,6 @@ export default function DashboardPage() {
       return startedAt >= weekStart && startedAt < weekEnd;
     });
 
-    // All-time total — weekly filter would return 0 if commits aren't from this week
     const totalCodingMinutes = (sessions ?? []).reduce(
       (sum, session) => sum + (session.duration_minutes || 0),
       0
@@ -221,7 +208,7 @@ export default function DashboardPage() {
 
       const dateStr = date.toDateString();
 
-      const daySessions = weeklySessions.filter(
+      const daySessions = sessions.filter(
         (s) =>
           new Date(s.started_at).toDateString() === dateStr
       );
@@ -431,7 +418,7 @@ export default function DashboardPage() {
               Coding Hours
             </CardTitle>
             <CardDescription>
-              All-time estimated from commits
+              All-time coding time from WakaTime
             </CardDescription>
           </CardHeader>
           <CardContent>
