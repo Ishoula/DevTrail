@@ -1,7 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const Deno = (globalThis as any).Deno;
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -19,47 +17,40 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-interface WakaTimeSummaryDay {
-  grand_total?: {
-    total_seconds?: number;
-    text?: string;
-    hours?: number;
-    minutes?: number;
-  };
-  range?: {
-    date?: string;
-    start?: string;
-    end?: string;
-  };
-}
-
-interface CodingSessionRow {
-  user_id: string;
-  started_at: string;
-  ended_at: string;
-  duration_minutes: number;
-  commit_count: number;
-}
-
+// ✅ SAFE base64 encoding for Deno Edge Runtime
 function encodeApiKey(apiKey: string) {
-  return btoa(apiKey);
+  return globalThis.btoa(apiKey);
 }
 
 Deno.serve(async (req: Request) => {
+  // ✅ CORS PRE-FLIGHT FIX (critical for your error)
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response("ok", {
+      status: 200,
+      headers: corsHeaders,
+    });
   }
 
   try {
+    console.log("wakatime-sync method:", req.method);
+
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return jsonResponse({ error: "Missing authorization header" }, 401);
     }
 
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+    const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
+    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_KEY) {
+      return jsonResponse(
+        { error: "Missing Supabase environment variables" },
+        500
+      );
+    }
+
+    // auth client (user verification)
     const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -74,13 +65,17 @@ Deno.serve(async (req: Request) => {
     }
 
     const apiKey = user.user_metadata?.wakatime_api_key;
-    if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
+
+    if (!apiKey || typeof apiKey !== "string") {
       return jsonResponse(
-        { error: "Missing WakaTime API key. Save it in Settings first." },
+        { error: "Missing WakaTime API key" },
         400
       );
     }
 
+    // =========================
+    // WA KATIME FETCH (SAFE)
+    // =========================
     const wakatimeResponse = await fetch(
       "https://wakatime.com/api/v1/users/current/summaries?range=last_30_days",
       {
@@ -91,27 +86,41 @@ Deno.serve(async (req: Request) => {
       }
     );
 
-    const wakatimeData = await wakatimeResponse.json();
+    // ✅ SAFE TEXT PARSING (prevents 500 crashes)
+    const rawText = await wakatimeResponse.text();
+
+    let wakatimeData: any;
+    try {
+      wakatimeData = JSON.parse(rawText);
+    } catch {
+      return jsonResponse(
+        {
+          error: "Invalid JSON from WakaTime",
+          raw: rawText.slice(0, 200),
+        },
+        502
+      );
+    }
 
     if (!wakatimeResponse.ok) {
       return jsonResponse(
         {
-          error: "Failed to fetch WakaTime summaries",
-          details: wakatimeData?.message ?? wakatimeData?.error ?? wakatimeData,
+          error: "WakaTime API error",
+          details: wakatimeData?.message ?? wakatimeData,
         },
         wakatimeResponse.status
       );
     }
 
-    const summaries: WakaTimeSummaryDay[] = Array.isArray(wakatimeData?.data)
+    const summaries = Array.isArray(wakatimeData?.data)
       ? wakatimeData.data
       : [];
 
-    const sessions: CodingSessionRow[] = summaries
-      .map((day) => {
-        const totalSeconds = day.grand_total?.total_seconds ?? 0;
-        const startedAt = day.range?.start;
-        const endedAt = day.range?.end;
+    const sessions = summaries
+      .map((day: any) => {
+        const totalSeconds = day?.grand_total?.total_seconds ?? 0;
+        const startedAt = day?.range?.start;
+        const endedAt = day?.range?.end;
 
         if (!startedAt || !endedAt) return null;
 
@@ -123,10 +132,11 @@ Deno.serve(async (req: Request) => {
           commit_count: 0,
         };
       })
-      .filter((row): row is CodingSessionRow => row !== null);
+      .filter(Boolean);
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+    // clear old sessions
     const { error: deleteError } = await supabase
       .from("coding_sessions")
       .delete()
@@ -134,19 +144,28 @@ Deno.serve(async (req: Request) => {
 
     if (deleteError) {
       return jsonResponse(
-        { error: "Failed to clear old coding sessions", details: deleteError.message },
+        {
+          error: "Failed to clear sessions",
+          details: deleteError.message,
+        },
         500
       );
     }
 
+    // insert new sessions
     if (sessions.length > 0) {
       const { error: upsertError } = await supabase
         .from("coding_sessions")
-        .upsert(sessions, { onConflict: "user_id,started_at" });
+        .upsert(sessions, {
+          onConflict: "user_id,started_at",
+        });
 
       if (upsertError) {
         return jsonResponse(
-          { error: "Failed to save WakaTime sessions", details: upsertError.message },
+          {
+            error: "Failed to save sessions",
+            details: upsertError.message,
+          },
           500
         );
       }
@@ -154,22 +173,26 @@ Deno.serve(async (req: Request) => {
 
     const totalSeconds =
       wakatimeData?.cumulative_total?.seconds ??
-      summaries.reduce((sum, day) => sum + (day.grand_total?.total_seconds ?? 0), 0);
+      summaries.reduce(
+        (sum: number, d: any) =>
+          sum + (d?.grand_total?.total_seconds ?? 0),
+        0
+      );
 
     return jsonResponse({
       success: true,
       total_seconds: totalSeconds,
       total_hours: Math.round((totalSeconds / 3600) * 10) / 10,
       days_synced: sessions.length,
-      summaries: sessions.map((session) => ({
-        started_at: session.started_at,
-        duration_minutes: session.duration_minutes,
-      })),
     });
   } catch (err) {
-    console.error("WAKATIME SYNC ERROR:", err);
+    console.error("WAKATIME ERROR:", err);
+
     return jsonResponse(
-      { error: "Internal server error", details: String(err) },
+      {
+        error: "Internal server error",
+        details: String(err),
+      },
       500
     );
   }
