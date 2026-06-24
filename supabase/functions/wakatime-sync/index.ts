@@ -27,7 +27,6 @@ type CodingSession = {
   started_at: string;
   ended_at: string;
   duration_minutes: number;
-  commit_count: number;
 };
 
 Deno.serve(async (req: Request) => {
@@ -150,7 +149,6 @@ Deno.serve(async (req: Request) => {
           started_at: startedAt,
           ended_at: endedAt,
           duration_minutes: Math.max(0, Math.round(totalSeconds / 60)),
-          commit_count: 0,
         };
       })
       .filter((session): session is CodingSession => session !== null);
