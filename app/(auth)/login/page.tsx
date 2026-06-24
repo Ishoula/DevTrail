@@ -24,8 +24,6 @@ export default function LoginPage() {
   setError('');
   setLoading(true);
 
-  console.log("LOGIN DATA:", { email, password });
-
   if (!email || !password) {
     setError("Email and password are required");
     setLoading(false);

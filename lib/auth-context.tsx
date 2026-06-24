@@ -108,9 +108,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return { error: error.message };
-    return { error: null };
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) return { error: error.message };
+      return { error: null };
+    } catch (error) {
+      console.error('Failed to sign in with Supabase:', error);
+      return {
+        error:
+          'Unable to reach Supabase. Check NEXT_PUBLIC_SUPABASE_URL and your network connection.',
+      };
+    }
   }, []);
 
   const signOut = useCallback(async () => {

@@ -66,10 +66,14 @@ export default function DashboardPage() {
 
     const projectIds = projects?.map((p) => p.id) ?? [];
 
-    const { data: tasks } = await supabase
-      .from('tasks')
-      .select('status, project_id')
-      .in('project_id', projectIds.length ? projectIds : ['__none__']);
+    const tasks = projectIds.length
+      ? (
+          await supabase
+            .from('tasks')
+            .select('status, project_id')
+            .in('project_id', projectIds)
+        ).data ?? []
+      : [];
 
     const { data: rawCommits } = await supabase
       .from('commits')

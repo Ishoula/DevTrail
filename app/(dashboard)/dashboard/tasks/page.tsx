@@ -81,17 +81,22 @@ export default function TasksPage() {
 
   const fetchData = useCallback(async () => {
     if (!user) return;
-    const [tasksRes, projectsRes] = await Promise.all([
-      supabase
-        .from('tasks')
-        .select('*, projects:project_id(name, color)')
-        .in('project_id', (await supabase.from('projects').select('id').eq('user_id', user.id)).data?.map((p) => p.id) || [''])
-        .order('position', { ascending: true }),
-      supabase.from('projects').select('id, name, color').eq('user_id', user.id),
-    ]);
+
+    const { data: projectRows } = await supabase
+      .from('projects')
+      .select('id, name, color')
+      .eq('user_id', user.id);
+    const projectIds = projectRows?.map((p) => p.id) ?? [];
+    const tasksRes = projectIds.length
+      ? await supabase
+          .from('tasks')
+          .select('*, projects:project_id(name, color)')
+          .in('project_id', projectIds)
+          .order('position', { ascending: true })
+      : { data: [] };
 
     setTasks((tasksRes.data as unknown as Task[]) || []);
-    setProjects(projectsRes.data || []);
+    setProjects(projectRows || []);
     setLoading(false);
   }, [user]);
 

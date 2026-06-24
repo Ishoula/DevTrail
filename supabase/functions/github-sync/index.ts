@@ -335,7 +335,7 @@ Deno.serve(async (req: Request) => {
 
     if (computedSessions.length > 0) {
       const { error: sessionErr } = await supabase
-        .from("coding_sessions")
+        .from("coding_sessios")
         .upsert(computedSessions, {
           onConflict: "user_id,started_at",
         });
