@@ -44,6 +44,25 @@ interface WakaTimeSyncResponse {
   details?: string;
 }
 
+async function getFunctionErrorMessage(error: unknown) {
+  const context = (error as { context?: Response | null })?.context;
+
+  if (context) {
+    try {
+      const body = await context.clone().json();
+      const message = body?.details || body?.error || body?.message;
+
+      if (message) {
+        return String(message);
+      }
+    } catch {
+      // Fall back to the SDK error message below.
+    }
+  }
+
+  return error instanceof Error ? error.message : 'Sync failed';
+}
+
 export default function SettingsPage() {
   const { user } = useAuth();
 
@@ -200,11 +219,16 @@ export default function SettingsPage() {
       }
 
       const { data, error } = await supabase.functions.invoke<WakaTimeSyncResponse>(
-  'wakatime-sync'
-);
+        'wakatime-sync',
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
 
       if (error) {
-        setWakatimeSyncResult(error.message);
+        setWakatimeSyncResult(await getFunctionErrorMessage(error));
         return;
       }
 

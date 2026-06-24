@@ -43,6 +43,25 @@ interface DashboardData {
   recentActivity: { id: string; type: string; title: string; time: string }[];
 }
 
+async function getFunctionErrorMessage(error: unknown) {
+  const context = (error as { context?: Response | null })?.context;
+
+  if (context) {
+    try {
+      const body = await context.clone().json();
+      const message = body?.details || body?.error || body?.message;
+
+      if (message) {
+        return String(message);
+      }
+    } catch {
+      // Fall back to the SDK error message below.
+    }
+  }
+
+  return error instanceof Error ? error.message : 'Sync failed';
+}
+
 export default function DashboardPage() {
   const { user } = useAuth();
 
@@ -72,7 +91,7 @@ export default function DashboardPage() {
       });
 
       if (error) {
-        console.error('Failed to sync WakaTime data:', error);
+        console.error('Failed to sync WakaTime data:', await getFunctionErrorMessage(error));
       }
     }
 

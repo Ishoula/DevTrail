@@ -17,22 +17,26 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-// ✅ SAFE base64 encoding for Deno Edge Runtime
+// WakaTime uses HTTP Basic auth with the API key as the username.
 function encodeApiKey(apiKey: string) {
-  return globalThis.btoa(apiKey);
+  return globalThis.btoa(`${apiKey}:`);
 }
 
+type CodingSession = {
+  user_id: string;
+  started_at: string;
+  ended_at: string;
+  duration_minutes: number;
+  commit_count: number;
+};
+
 Deno.serve(async (req: Request) => {
-  // ✅ CORS PRE-FLIGHT FIX (critical for your error)
   if (req.method === "OPTIONS") {
-    return new Response("ok", {
-      status: 200,
-      headers: corsHeaders,
-    });
+    return new Response("ok", { status: 200, headers: corsHeaders });
   }
 
   try {
-    console.log("wakatime-sync method:", req.method);
+    console.log("wakatime-sync hit:", req.method);
 
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
@@ -41,16 +45,15 @@ Deno.serve(async (req: Request) => {
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
-    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_KEY) {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
       return jsonResponse(
         { error: "Missing Supabase environment variables" },
-        500
+        500,
       );
     }
 
-    // auth client (user verification)
     const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -64,17 +67,15 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: "Unauthorized" }, 401);
     }
 
-    const apiKey = user.user_metadata?.wakatime_api_key;
+    // ✅ SAFE access
+    const apiKey = user?.user_metadata?.wakatime_api_key;
 
     if (!apiKey || typeof apiKey !== "string") {
-      return jsonResponse(
-        { error: "Missing WakaTime API key" },
-        400
-      );
+      return jsonResponse({ error: "Missing WakaTime API key" }, 400);
     }
 
     // =========================
-    // WA KATIME FETCH (SAFE)
+    // FETCH WAKATIME
     // =========================
     const wakatimeResponse = await fetch(
       "https://wakatime.com/api/v1/users/current/summaries?range=last_30_days",
@@ -83,22 +84,25 @@ Deno.serve(async (req: Request) => {
           Authorization: `Basic ${encodeApiKey(apiKey.trim())}`,
           Accept: "application/json",
         },
-      }
+      },
     );
 
-    // ✅ SAFE TEXT PARSING (prevents 500 crashes)
     const rawText = await wakatimeResponse.text();
 
+    console.log("WakaTime status:", wakatimeResponse.status);
+    console.log("WakaTime raw preview:", rawText.slice(0, 300));
+
     let wakatimeData: any;
+
     try {
       wakatimeData = JSON.parse(rawText);
     } catch {
       return jsonResponse(
         {
           error: "Invalid JSON from WakaTime",
-          raw: rawText.slice(0, 200),
+          raw: rawText.slice(0, 300),
         },
-        502
+        502,
       );
     }
 
@@ -106,18 +110,35 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(
         {
           error: "WakaTime API error",
-          details: wakatimeData?.message ?? wakatimeData,
+          details: wakatimeData?.message || wakatimeData,
         },
-        wakatimeResponse.status
+        wakatimeResponse.status,
       );
     }
 
-    const summaries = Array.isArray(wakatimeData?.data)
-      ? wakatimeData.data
-      : [];
+    // =========================
+    // SAFE NORMALIZATION
+    // =========================
+    const summaries = wakatimeData?.data?.summaries ??
+      wakatimeData?.data ??
+      wakatimeData?.summaries ??
+      [];
 
-    const sessions = summaries
-      .map((day: any) => {
+    if (!Array.isArray(summaries)) {
+      return jsonResponse(
+        {
+          error: "Unexpected WakaTime format",
+          received: typeof summaries,
+        },
+        502,
+      );
+    }
+
+    // =========================
+    // BUILD SESSIONS
+    // =========================
+    const sessions: CodingSession[] = summaries
+      .map((day: any): CodingSession | null => {
         const totalSeconds = day?.grand_total?.total_seconds ?? 0;
         const startedAt = day?.range?.start;
         const endedAt = day?.range?.end;
@@ -132,11 +153,35 @@ Deno.serve(async (req: Request) => {
           commit_count: 0,
         };
       })
-      .filter(Boolean);
+      .filter((session): session is CodingSession => session !== null);
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // clear old sessions
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .upsert(
+        {
+          id: user.id,
+          name: user.user_metadata?.name ??
+            user.user_metadata?.full_name ??
+            user.email?.split("@")[0] ??
+            "",
+          avatar_url: user.user_metadata?.avatar_url ?? "",
+        },
+        { onConflict: "id" },
+      );
+
+    if (profileError) {
+      return jsonResponse(
+        {
+          error: "Failed to ensure user profile",
+          details: profileError.message,
+        },
+        500,
+      );
+    }
+
+    // DELETE OLD
     const { error: deleteError } = await supabase
       .from("coding_sessions")
       .delete()
@@ -144,15 +189,12 @@ Deno.serve(async (req: Request) => {
 
     if (deleteError) {
       return jsonResponse(
-        {
-          error: "Failed to clear sessions",
-          details: deleteError.message,
-        },
-        500
+        { error: "Failed to delete sessions", details: deleteError.message },
+        500,
       );
     }
 
-    // insert new sessions
+    // UPSERT NEW
     if (sessions.length > 0) {
       const { error: upsertError } = await supabase
         .from("coding_sessions")
@@ -162,21 +204,16 @@ Deno.serve(async (req: Request) => {
 
       if (upsertError) {
         return jsonResponse(
-          {
-            error: "Failed to save sessions",
-            details: upsertError.message,
-          },
-          500
+          { error: "Failed to upsert sessions", details: upsertError.message },
+          500,
         );
       }
     }
 
-    const totalSeconds =
-      wakatimeData?.cumulative_total?.seconds ??
+    const totalSeconds = wakatimeData?.cumulative_total?.seconds ??
       summaries.reduce(
-        (sum: number, d: any) =>
-          sum + (d?.grand_total?.total_seconds ?? 0),
-        0
+        (sum: number, d: any) => sum + (d?.grand_total?.total_seconds ?? 0),
+        0,
       );
 
     return jsonResponse({
@@ -185,15 +222,16 @@ Deno.serve(async (req: Request) => {
       total_hours: Math.round((totalSeconds / 3600) * 10) / 10,
       days_synced: sessions.length,
     });
-  } catch (err) {
-    console.error("WAKATIME ERROR:", err);
+  } catch (err: any) {
+    console.error("WAKATIME SYNC CRASH:", err);
 
     return jsonResponse(
       {
         error: "Internal server error",
-        details: String(err),
+        details: err?.message || String(err),
+        stack: err?.stack,
       },
-      500
+      500,
     );
   }
 });
