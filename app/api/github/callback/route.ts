@@ -1,12 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
+  const requestUrl = new URL(req.url);
+  const { searchParams } = requestUrl;
   const code = searchParams.get('code');
   const userId = searchParams.get('state');
 
   if (!code) return new Response('Missing code', { status: 400 });
   if (!userId) return new Response('Missing state (user ID)', { status: 400 });
+
+  const redirectUri = `${requestUrl.origin}/api/github/callback`;
 
   // exchange code for access token
   const res = await fetch('https://github.com/login/oauth/access_token', {
@@ -17,8 +20,11 @@ export async function GET(req: Request) {
     },
     body: JSON.stringify({
       client_id: process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID,
-      client_secret: process.env.NEXT_PUBLIC_GITHUB_CLIENT_SECRET,
+      client_secret:
+        process.env.GITHUB_CLIENT_SECRET ??
+        process.env.NEXT_PUBLIC_GITHUB_CLIENT_SECRET,
       code,
+      redirect_uri: redirectUri,
     }),
   });
 
@@ -27,7 +33,9 @@ export async function GET(req: Request) {
   const token = data.access_token;
 
   if (!token) {
-    return new Response('OAuth failed', { status: 400 });
+    return new Response(data.error_description ?? data.error ?? 'OAuth failed', {
+      status: 400,
+    });
   }
 
   // create supabase client with service role
@@ -37,12 +45,16 @@ export async function GET(req: Request) {
   );
 
   // save the GitHub token to the user's metadata
-  await supabase.auth.admin.updateUserById(userId, {
+  const { error } = await supabase.auth.admin.updateUserById(userId, {
     user_metadata: {
       github_token: token,
     },
   });
 
+  if (error) {
+    return new Response(error.message, { status: 400 });
+  }
+
   // redirect back to settings
-  return Response.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/dashboard/settings`);
+  return Response.redirect(`${requestUrl.origin}/dashboard/settings`);
 }

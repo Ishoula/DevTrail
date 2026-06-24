@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase';
-import { useSearchParams } from 'next/navigation';
 
 import {
   Card,
@@ -43,11 +42,26 @@ export default function SettingsPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [heatmap, setHeatmap] = useState<HeatmapDay[]>([]);
+  const [appOrigin, setAppOrigin] = useState('');
 
   // =========================
   // OAUTH URL
   // =========================
-  const githubOAuthUrl = `https://github.com/login/oauth/authorize?client_id=${process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID}&scope=read:user repo&state=${user?.id ?? ''}`;
+  const githubOAuthParams = new URLSearchParams({
+    client_id: process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID ?? '',
+    scope: 'read:user repo',
+    state: user?.id ?? '',
+  });
+
+  if (appOrigin) {
+    githubOAuthParams.set('redirect_uri', `${appOrigin}/api/github/callback`);
+  }
+
+  const githubOAuthUrl = `https://github.com/login/oauth/authorize?${githubOAuthParams.toString()}`;
+
+  useEffect(() => {
+    setAppOrigin(window.location.origin);
+  }, []);
 
   // =========================
   // LOAD GITHUB CONNECTION (SOURCE OF TRUTH = SUPABASE USER)
