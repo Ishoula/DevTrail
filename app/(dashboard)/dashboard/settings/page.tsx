@@ -200,13 +200,8 @@ export default function SettingsPage() {
       }
 
       const { data, error } = await supabase.functions.invoke<WakaTimeSyncResponse>(
-        'wakatime-sync',
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
-      );
+  'wakatime-sync'
+);
 
       if (error) {
         setWakatimeSyncResult(error.message);
