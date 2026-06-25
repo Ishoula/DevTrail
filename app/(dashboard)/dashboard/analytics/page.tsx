@@ -43,6 +43,7 @@ interface SessionDetail {
 
 interface AnalyticsData {
   totalCommits: number;
+  totalContributions: number;
   totalHours: number;
   longestStreak: number;
   currentStreak: number;
@@ -85,7 +86,7 @@ export default function AnalyticsPage() {
         }
       }
 
-      const [commitsRes, sessionsRes] = await Promise.all([
+      const [commitsRes, sessionsRes, githubStatsRes] = await Promise.all([
         supabase
           .from('commits')
           .select('*')
@@ -96,10 +97,16 @@ export default function AnalyticsPage() {
           .select('*')
           .eq('user_id', user.id)
           .order('started_at', { ascending: false }), // newest first for the details card
+        supabase
+          .from('github_stats')
+          .select('total_contributions')
+          .eq('user_id', user.id)
+          .maybeSingle(),
       ]);
 
       const commits = commitsRes.data || [];
       const sessions = sessionsRes.data || [];
+      const totalContributions = githubStatsRes.data?.total_contributions ?? 0;
 
       // ── Commit trend (last 30 days) ──────────────────────────────────────
       const now = new Date();
@@ -205,6 +212,7 @@ export default function AnalyticsPage() {
 
       setData({
         totalCommits: commits.length,
+        totalContributions,
         totalHours,
         longestStreak,
         currentStreak,
@@ -254,8 +262,8 @@ export default function AnalyticsPage() {
           <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between">
               <div className="min-w-0">
-                <p className="text-sm text-muted-foreground">Total Commits</p>
-                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.totalCommits}</p>
+                <p className="text-sm text-muted-foreground">Total Contributions</p>
+                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.totalContributions}</p>
               </div>
               <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
                 <GitCommitHorizontal className="h-6 w-6 text-primary" />
