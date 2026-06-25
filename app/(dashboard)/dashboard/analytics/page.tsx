@@ -22,8 +22,8 @@ import {
 } from 'recharts';
 import { GitCommitHorizontal, Clock, Flame, TrendingUp, Timer } from 'lucide-react';
 
-const commitChartConfig = {
-  commits: { label: 'Commits', color: 'hsl(var(--primary))' },
+const contributionChartConfig = {
+  contributions: { label: 'Contributions', color: 'hsl(var(--primary))' },
 } satisfies ChartConfig;
 
 const hoursChartConfig = {
@@ -47,8 +47,8 @@ interface AnalyticsData {
   totalHours: number;
   longestStreak: number;
   currentStreak: number;
-  avgDailyCommits: number;
-  commitTrend: { date: string; commits: number }[];
+  avgDailyContributions: number;
+  contributionTrend: { date: string; contributions: number }[];
   hoursTrend: { date: string; hours: number }[];
   repoBreakdown: { repo: string; count: number }[];
   heatmapData: { day: number; hour: number; value: number }[];
@@ -86,7 +86,7 @@ export default function AnalyticsPage() {
         }
       }
 
-      const [commitsRes, sessionsRes, githubStatsRes] = await Promise.all([
+      const [commitsRes, sessionsRes, githubStatsRes, githubHeatmapRes] = await Promise.all([
         supabase
           .from('commits')
           .select('*')
@@ -102,23 +102,33 @@ export default function AnalyticsPage() {
           .select('total_contributions')
           .eq('user_id', user.id)
           .maybeSingle(),
+        supabase
+          .from('github_heatmap')
+          .select('contribution_date, contribution_count')
+          .eq('user_id', user.id)
+          .order('contribution_date', { ascending: true }),
       ]);
 
       const commits = commitsRes.data || [];
       const sessions = sessionsRes.data || [];
+      const contributionDays = githubHeatmapRes.data || [];
       const totalContributions = githubStatsRes.data?.total_contributions ?? 0;
 
-      // ── Commit trend (last 30 days) ──────────────────────────────────────
+      // ── Contribution trend (last 30 days) ────────────────────────────────
       const now = new Date();
-      const commitTrend = Array.from({ length: 30 }, (_, i) => {
+      const contributionByDate = new Map(
+        contributionDays.map((day) => [
+          day.contribution_date,
+          day.contribution_count ?? 0,
+        ])
+      );
+      const contributionTrend = Array.from({ length: 30 }, (_, i) => {
         const date = new Date(now);
         date.setDate(now.getDate() - (29 - i));
         const dateStr = date.toISOString().split('T')[0];
         return {
           date: date.toLocaleDateString('en', { month: 'short', day: 'numeric' }),
-          commits: commits.filter(
-            (c) => new Date(c.committed_at).toISOString().split('T')[0] === dateStr
-          ).length,
+          contributions: contributionByDate.get(dateStr) ?? 0,
         };
       });
 
@@ -199,8 +209,11 @@ export default function AnalyticsPage() {
           (sessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0) / 60) * 10
         ) / 10;
 
-      const avgDailyCommits =
-        commits.length > 0 ? Math.round((commits.length / 30) * 10) / 10 : 0;
+      const last30Contributions = contributionTrend.reduce(
+        (sum, day) => sum + day.contributions,
+        0
+      );
+      const avgDailyContributions = Math.round((last30Contributions / 30) * 10) / 10;
 
       // ── Recent sessions (newest 10) ──────────────────────────────────────
       const recentSessions: SessionDetail[] = sessions.slice(0, 10).map((s) => ({
@@ -216,8 +229,8 @@ export default function AnalyticsPage() {
         totalHours,
         longestStreak,
         currentStreak,
-        avgDailyCommits,
-        commitTrend,
+        avgDailyContributions,
+        contributionTrend,
         hoursTrend,
         repoBreakdown,
         heatmapData,
@@ -307,8 +320,8 @@ export default function AnalyticsPage() {
           <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between">
               <div className="min-w-0">
-                <p className="text-sm text-muted-foreground">Avg Daily Commits</p>
-                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.avgDailyCommits}</p>
+                <p className="text-sm text-muted-foreground">Avg Daily Contributions</p>
+                <p className="mt-1 text-2xl font-bold sm:text-3xl">{data.avgDailyContributions}</p>
               </div>
               <div className="h-12 w-12 rounded-lg bg-blue-500/10 flex items-center justify-center">
                 <TrendingUp className="h-6 w-6 text-blue-500" />
@@ -322,18 +335,18 @@ export default function AnalyticsPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="overflow-hidden border-border/50">
           <CardHeader>
-            <CardTitle className="text-base">Commit Activity</CardTitle>
-            <CardDescription>Daily commits over the last 30 days</CardDescription>
+            <CardTitle className="text-base">Contribution Activity</CardTitle>
+            <CardDescription>Daily contributions over the last 30 days</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="scrollbar-chart -mx-2 overflow-x-auto pb-3 sm:mx-0">
-              <ChartContainer config={commitChartConfig} className="h-[240px] min-w-[620px] sm:h-[280px] sm:min-w-0">
-                <AreaChart data={data.commitTrend} margin={{ left: 0, right: 12 }}>
+              <ChartContainer config={contributionChartConfig} className="h-[240px] min-w-[620px] sm:h-[280px] sm:min-w-0">
+                <AreaChart data={data.contributionTrend} margin={{ left: 0, right: 12 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
                   <XAxis dataKey="date" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} interval={6} />
                   <YAxis className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} allowDecimals={false} width={32} />
                   <ChartTooltip content={<ChartTooltipContent />} />
-                  <Area type="monotone" dataKey="commits" stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.1} strokeWidth={2} />
+                  <Area type="monotone" dataKey="contributions" stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.1} strokeWidth={2} />
                 </AreaChart>
               </ChartContainer>
             </div>
@@ -448,7 +461,7 @@ export default function AnalyticsPage() {
             </div>
             <div className="h-12 w-px bg-border" />
             <div className="text-center">
-              <p className="text-3xl font-bold">{data.avgDailyCommits}</p>
+              <p className="text-3xl font-bold">{data.avgDailyContributions}</p>
               <p className="text-xs text-muted-foreground">Avg/Day</p>
             </div>
           </div>

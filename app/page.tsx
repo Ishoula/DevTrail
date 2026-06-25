@@ -56,7 +56,7 @@ export default function HomePage() {
           <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
             <Link href="/" className="flex items-center gap-2">
               <Code2 className="h-6 w-6 text-primary" />
-              <span className="text-base font-bold">DevTrack</span>
+              <span className="text-base font-bold">DevTrail</span>
             </Link>
             <div className="flex items-center gap-2">
               <Button asChild variant="ghost" className="hidden sm:inline-flex">
@@ -84,7 +84,7 @@ export default function HomePage() {
               Developer productivity, without the noise
             </Badge>
             <h1 className="max-w-3xl text-4xl font-bold leading-tight tracking-normal sm:text-6xl lg:text-7xl">
-              DevTrack
+              DevTrail
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
               A private command center for projects, tasks, GitHub activity, and weekly momentum. Know what moved, what is blocked, and where your focus is paying off.
@@ -197,7 +197,7 @@ export default function HomePage() {
 
       <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
         <div className="max-w-2xl">
-          <p className="text-sm font-semibold uppercase text-primary">What DevTrack brings together</p>
+          <p className="text-sm font-semibold uppercase text-primary">What DevTrail brings together</p>
           <h2 className="mt-3 text-3xl font-bold tracking-normal sm:text-4xl">
             Built for developers who want a clearer signal from their week.
           </h2>
@@ -219,7 +219,7 @@ export default function HomePage() {
             <p className="text-sm font-semibold uppercase text-primary">Workflow</p>
             <h2 className="mt-3 text-3xl font-bold tracking-normal">From plan to proof.</h2>
             <p className="mt-4 text-muted-foreground">
-              DevTrack connects project planning with the activity that proves progress. Create tasks, move work across review, sync GitHub, and check the analytics when the week needs a reality check.
+              DevTrail connects project planning with the activity that proves progress. Create tasks, move work across review, sync GitHub, and check the analytics when the week needs a reality check.
             </p>
           </div>
           <div className="grid gap-3">

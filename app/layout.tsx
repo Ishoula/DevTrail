@@ -6,7 +6,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next"
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'DevTrack - Developer Productivity Dashboard',
+  title: 'DevTrail - Developer Productivity Dashboard',
   description: 'Track your development productivity with projects, tasks, and GitHub analytics',
  
 };
