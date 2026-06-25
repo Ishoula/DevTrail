@@ -21,6 +21,8 @@ import {
   YAxis,
   BarChart,
   Bar,
+  LineChart,
+  Line,
   ResponsiveContainer,
 } from 'recharts';
 import { Button } from '@/components/ui/button';
@@ -315,13 +317,22 @@ export default function DashboardPage() {
         return;
       }
 
+      // Fetch the latest user object to ensure we have the fresh github_token metadata
+      const { data: { user: freshUser } } = await supabase.auth.getUser();
+      const token = freshUser?.user_metadata?.github_token;
+
+      if (!token) {
+        setSyncResult('GitHub token not found. Connect GitHub in settings.');
+        setSyncing(false);
+        return;
+      }
+
       const { data, error } =
         await supabase.functions.invoke(
           'github-sync',
           {
             body: {
-              github_token:
-                user.user_metadata?.github_token,
+              github_token: token,
             },
             headers: {
               Authorization: `Bearer ${accessToken}`,
@@ -495,11 +506,11 @@ export default function DashboardPage() {
           <CardContent className="min-w-0">
             <div className="h-[250px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data.sessionData}>
+                <LineChart data={data.sessionData}>
                   <XAxis dataKey="day" />
-                  <YAxis />
-                  <Bar dataKey="hours" fill="hsl(var(--primary))" />
-                </BarChart>
+                  <YAxis domain={[0, 12]} />
+                  <Line type="monotone" dataKey="hours" stroke="hsl(var(--primary))" strokeWidth={2} activeDot={{ r: 6 }} />
+                </LineChart>
               </ResponsiveContainer>
             </div>
           </CardContent>

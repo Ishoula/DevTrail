@@ -81,8 +81,77 @@ function calculateStreak(calendar: any) {
   return streak;
 }
 
+// ===================== SESSION LOGIC =====================
+const SESSION_BREAK_MS = 120 * 60 * 1000;
+const INITIAL_BUFFER_MS = 30 * 60 * 1000;
+const FINAL_BUFFER_MS = 10 * 60 * 1000;
+
 interface CommitRow {
   committed_at: string;
+}
+
+interface CodingSessionRow {
+  user_id: string;
+  started_at: string;
+  ended_at: string;
+  duration_minutes: number;
+  commit_count: number;
+}
+
+function computeSessions(
+  userId: string,
+  commits: CommitRow[]
+): CodingSessionRow[] {
+  if (!commits.length) return [];
+
+  const timestamps = commits
+    .map((c) => new Date(c.committed_at).getTime())
+    .filter((t) => !isNaN(t))
+    .sort((a, b) => a - b);
+
+  if (!timestamps.length) return [];
+
+  const sessions: CodingSessionRow[] = [];
+
+  let start = timestamps[0];
+  let end = timestamps[0];
+  let count = 1;
+
+  for (let i = 1; i < timestamps.length; i++) {
+    const gap = timestamps[i] - timestamps[i - 1];
+
+    if (gap > SESSION_BREAK_MS) {
+      sessions.push(buildSession(userId, start, end, count));
+      start = timestamps[i];
+      count = 1;
+    } else {
+      count++;
+    }
+
+    end = timestamps[i];
+  }
+
+  sessions.push(buildSession(userId, start, end, count));
+
+  return sessions;
+}
+
+function buildSession(
+  userId: string,
+  first: number,
+  last: number,
+  count: number
+): CodingSessionRow {
+  const startedMs = first - INITIAL_BUFFER_MS;
+  const endedMs = last + FINAL_BUFFER_MS;
+
+  return {
+    user_id: userId,
+    started_at: new Date(startedMs).toISOString(),
+    ended_at: new Date(endedMs).toISOString(),
+    duration_minutes: Math.round((endedMs - startedMs) / 60000),
+    commit_count: count,
+  };
 }
 
 // ===================== MAIN FUNCTION =====================
@@ -259,6 +328,25 @@ Deno.serve(async (req: Request) => {
         });
     }
 
+    // ===================== COMPUTE + SAVE SESSIONS =====================
+    let sessions_synced = 0;
+
+    const computedSessions = computeSessions(userId, commits);
+
+    if (computedSessions.length > 0) {
+      const { error: sessionErr } = await supabase
+        .from("coding_sessios")
+        .upsert(computedSessions, {
+          onConflict: "user_id,started_at",
+        });
+
+      if (sessionErr) {
+        console.error("SESSION UPSERT ERROR:", sessionErr);
+      } else {
+        sessions_synced = computedSessions.length;
+      }
+    }
+
     // ===================== RESPONSE =====================
     return jsonResponse({
       success: true,
@@ -267,6 +355,7 @@ Deno.serve(async (req: Request) => {
       total_contributions: contributions.totalContributions,
       commits_synced: commits.length,
       repos_synced: repoRecords.length,
+      sessions_synced,
       stats: {
         push_events: pushEvents.length,
         total_events: events.length,

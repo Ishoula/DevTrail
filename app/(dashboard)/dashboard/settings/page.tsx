@@ -94,6 +94,16 @@ export default function SettingsPage() {
 
   useEffect(() => {
     setAppOrigin(window.location.origin);
+
+    // Refresh session to get the latest user metadata (like github_token) updated by the OAuth callback
+    const refresh = async () => {
+      try {
+        await supabase.auth.refreshSession();
+      } catch (err) {
+        console.error('Failed to refresh session on load:', err);
+      }
+    };
+    refresh();
   }, []);
 
   // =========================
@@ -126,9 +136,9 @@ export default function SettingsPage() {
   // SYNC FUNCTION
   // =========================
   const syncGitHub = async (tokenOverride?: string) => {
-    const token = tokenOverride || githubToken;
+    let token = tokenOverride || githubToken;
 
-    if (!user || !token) return;
+    if (!user) return;
 
     setSyncing(true);
     setSyncResult(null);
@@ -139,6 +149,18 @@ export default function SettingsPage() {
 
       if (!accessToken) {
         setSyncResult('No session found');
+        setSyncing(false);
+        return;
+      }
+
+      if (!token) {
+        // Fetch the latest user object to ensure we have the fresh github_token metadata
+        const { data: { user: freshUser } } = await supabase.auth.getUser();
+        token = freshUser?.user_metadata?.github_token;
+      }
+
+      if (!token) {
+        setSyncResult('GitHub token not found. Connect GitHub first.');
         setSyncing(false);
         return;
       }

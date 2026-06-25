@@ -340,13 +340,13 @@ export default function AnalyticsPage() {
           <CardContent>
             <div className="scrollbar-chart -mx-2 overflow-x-auto pb-3 sm:mx-0">
               <ChartContainer config={hoursChartConfig} className="h-[240px] min-w-[620px] sm:h-[280px] sm:min-w-0">
-                <BarChart data={data.hoursTrend} margin={{ left: 0, right: 12 }}>
+                <AreaChart data={data.hoursTrend} margin={{ left: 0, right: 12 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
                   <XAxis dataKey="date" className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} interval={6} />
                   <YAxis className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} allowDecimals={false} width={32} />
                   <ChartTooltip content={<ChartTooltipContent />} />
-                  <Bar dataKey="hours" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
-                </BarChart>
+                  <Area type="monotone" dataKey="hours" stroke="hsl(var(--chart-2))" fill="hsl(var(--chart-2))" fillOpacity={0.1} strokeWidth={2} />
+                </AreaChart>
               </ChartContainer>
             </div>
           </CardContent>
