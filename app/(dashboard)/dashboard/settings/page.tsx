@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { useAuth } from '@/lib/auth-context';
-import { supabase } from '@/lib/supabase';
+import { useEffect, useState } from "react";
+import { useAuth } from "@/lib/auth-context";
+import { supabase } from "@/lib/supabase";
 
 import {
   Card,
@@ -10,12 +10,12 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@/components/ui/card';
+} from "@/components/ui/card";
 
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Github, User, Key, Timer } from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Github, User, Key, Timer } from "lucide-react";
 
 // =========================
 // TYPES
@@ -60,34 +60,36 @@ async function getFunctionErrorMessage(error: unknown) {
     }
   }
 
-  return error instanceof Error ? error.message : 'Sync failed';
+  return error instanceof Error ? error.message : "Sync failed";
 }
 
 export default function SettingsPage() {
   const { user } = useAuth();
 
-  const [githubToken, setGithubToken] = useState('');
+  const [githubToken, setGithubToken] = useState("");
   const [githubConnected, setGithubConnected] = useState(false);
-  const [wakatimeApiKey, setWakatimeApiKey] = useState('');
+  const [wakatimeApiKey, setWakatimeApiKey] = useState("");
   const [wakatimeConnected, setWakatimeConnected] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [wakatimeSyncing, setWakatimeSyncing] = useState(false);
-  const [wakatimeSyncResult, setWakatimeSyncResult] = useState<string | null>(null);
+  const [wakatimeSyncResult, setWakatimeSyncResult] = useState<string | null>(
+    null,
+  );
   const [heatmap, setHeatmap] = useState<HeatmapDay[]>([]);
-  const [appOrigin, setAppOrigin] = useState('');
+  const [appOrigin, setAppOrigin] = useState("");
 
   // =========================
   // OAUTH URL
   // =========================
   const githubOAuthParams = new URLSearchParams({
-    client_id: process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID ?? '',
-    scope: 'read:user repo',
-    state: user?.id ?? '',
+    client_id: process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID ?? "",
+    scope: "read:user repo",
+    state: user?.id ?? "",
   });
 
   if (appOrigin) {
-    githubOAuthParams.set('redirect_uri', `${appOrigin}/api/github/callback`);
+    githubOAuthParams.set("redirect_uri", `${appOrigin}/api/github/callback`);
   }
 
   const githubOAuthUrl = `https://github.com/login/oauth/authorize?${githubOAuthParams.toString()}`;
@@ -100,7 +102,7 @@ export default function SettingsPage() {
       try {
         await supabase.auth.refreshSession();
       } catch (err) {
-        console.error('Failed to refresh session on load:', err);
+        console.error("Failed to refresh session on load:", err);
       }
     };
     refresh();
@@ -148,26 +150,27 @@ export default function SettingsPage() {
       const accessToken = session.session?.access_token;
 
       if (!accessToken) {
-        setSyncResult('No session found');
+        setSyncResult("No session found");
         setSyncing(false);
         return;
       }
 
       if (!token) {
         // Fetch the latest user object to ensure we have the fresh github_token metadata
-        const { data: { user: freshUser } } = await supabase.auth.getUser();
+        const {
+          data: { user: freshUser },
+        } = await supabase.auth.getUser();
         token = freshUser?.user_metadata?.github_token;
       }
 
       if (!token) {
-        setSyncResult('GitHub token not found. Connect GitHub first.');
+        setSyncResult("GitHub token not found. Connect GitHub first.");
         setSyncing(false);
         return;
       }
 
-      const { data, error } = await supabase.functions.invoke<GitHubSyncResponse>(
-        'github-sync',
-        {
+      const { data, error } =
+        await supabase.functions.invoke<GitHubSyncResponse>("github-sync", {
           body: {
             user_id: user.id,
             github_token: token,
@@ -175,8 +178,7 @@ export default function SettingsPage() {
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
-        }
-      );
+        });
 
       if (error) {
         setSyncResult(error.message);
@@ -190,13 +192,13 @@ export default function SettingsPage() {
         setSyncResult(
           `🔥 ${data.streak ?? 0} day streak • ⭐ ${
             data.total_contributions ?? 0
-          } contributions • 📦 ${data.repos_synced ?? 0} repos`
+          } contributions • 📦 ${data.repos_synced ?? 0} repos`,
         );
       } else {
-        setSyncResult(data?.error || 'Sync failed');
+        setSyncResult(data?.error || "Sync failed");
       }
     } catch {
-      setSyncResult('Unexpected error occurred');
+      setSyncResult("Unexpected error occurred");
     } finally {
       setSyncing(false);
     }
@@ -207,7 +209,7 @@ export default function SettingsPage() {
   // =========================
   const saveWakaTimeKey = async () => {
     if (!wakatimeApiKey.trim()) {
-      setWakatimeSyncResult('Paste your WakaTime API key first.');
+      setWakatimeSyncResult("Paste your WakaTime API key first.");
       return;
     }
 
@@ -222,9 +224,9 @@ export default function SettingsPage() {
       return;
     }
 
-    setWakatimeApiKey('');
+    setWakatimeApiKey("");
     setWakatimeConnected(true);
-    setWakatimeSyncResult('WakaTime key saved.');
+    setWakatimeSyncResult("WakaTime key saved.");
   };
 
   const syncWakaTime = async () => {
@@ -236,18 +238,16 @@ export default function SettingsPage() {
       const accessToken = session.session?.access_token;
 
       if (!accessToken) {
-        setWakatimeSyncResult('No session found');
+        setWakatimeSyncResult("No session found");
         return;
       }
 
-      const { data, error } = await supabase.functions.invoke<WakaTimeSyncResponse>(
-        'wakatime-sync',
-        {
+      const { data, error } =
+        await supabase.functions.invoke<WakaTimeSyncResponse>("wakatime-sync", {
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
-        }
-      );
+        });
 
       if (error) {
         setWakatimeSyncResult(await getFunctionErrorMessage(error));
@@ -256,17 +256,21 @@ export default function SettingsPage() {
 
       if (data?.success) {
         setWakatimeSyncResult(
-          `Synced ${data.days_synced ?? 0} days • ${data.total_hours ?? 0} hours`
+          `Synced ${data.days_synced ?? 0} days • ${data.total_hours ?? 0} hours`,
         );
       } else {
-        setWakatimeSyncResult(data?.error || data?.details || 'Sync failed');
+        setWakatimeSyncResult(data?.error || data?.details || "Sync failed");
       }
     } catch {
-      setWakatimeSyncResult('Unexpected error occurred');
+      setWakatimeSyncResult("Unexpected error occurred");
     } finally {
       setWakatimeSyncing(false);
     }
   };
+
+  console.log("CLIENT_ID:", process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID);
+  console.log("APP_ORIGIN:", appOrigin);
+  console.log("OAUTH_URL:", githubOAuthUrl);
 
   // =========================
   // UI
@@ -321,23 +325,23 @@ export default function SettingsPage() {
             </CardHeader>
 
             <CardContent className="space-y-4">
-
               {/* STATUS */}
               <div className="flex items-center gap-2 text-sm">
                 <div
                   className={`h-2 w-2 rounded-full ${
-                    githubConnected ? 'bg-green-500' : 'bg-gray-400'
+                    githubConnected ? "bg-green-500" : "bg-gray-400"
                   }`}
                 />
-                {githubConnected ? 'Connected' : 'Not connected'}
+                {githubConnected ? "Connected" : "Not connected"}
               </div>
 
               {/* CONNECT BUTTON */}
-              <Button asChild>
-                <a href={githubOAuthUrl}>
-                  <Github className="w-4 h-4 mr-2" />
-                  {githubConnected ? 'Reconnect GitHub' : 'Connect GitHub'}
-                </a>
+              <Button
+                type="button"
+                onClick={() => window.location.assign(githubOAuthUrl)}
+              >
+                <Github className="w-4 h-4 mr-2" />
+                {githubConnected ? "Reconnect GitHub" : "Connect GitHub"}
               </Button>
 
               {/* SYNC BUTTON */}
@@ -346,14 +350,12 @@ export default function SettingsPage() {
                 onClick={() => syncGitHub()}
                 disabled={syncing || !githubToken}
               >
-                {syncing ? 'Syncing...' : 'Sync Data'}
+                {syncing ? "Syncing..." : "Sync Data"}
               </Button>
 
               {/* RESULT */}
               {syncResult && (
-                <p className="text-sm text-muted-foreground">
-                  {syncResult}
-                </p>
+                <p className="text-sm text-muted-foreground">{syncResult}</p>
               )}
 
               {/* HEATMAP INFO */}
@@ -380,10 +382,10 @@ export default function SettingsPage() {
               <div className="flex items-center gap-2 text-sm">
                 <div
                   className={`h-2 w-2 rounded-full ${
-                    wakatimeConnected ? 'bg-green-500' : 'bg-gray-400'
+                    wakatimeConnected ? "bg-green-500" : "bg-gray-400"
                   }`}
                 />
-                {wakatimeConnected ? 'Connected' : 'Not connected'}
+                {wakatimeConnected ? "Connected" : "Not connected"}
               </div>
 
               <div className="space-y-2">
@@ -401,15 +403,13 @@ export default function SettingsPage() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Button onClick={saveWakaTimeKey}>
-                  Save WakaTime Key
-                </Button>
+                <Button onClick={saveWakaTimeKey}>Save WakaTime Key</Button>
                 <Button
                   variant="outline"
                   onClick={syncWakaTime}
                   disabled={wakatimeSyncing || !wakatimeConnected}
                 >
-                  {wakatimeSyncing ? 'Syncing...' : 'Sync WakaTime'}
+                  {wakatimeSyncing ? "Syncing..." : "Sync WakaTime"}
                 </Button>
               </div>
 
