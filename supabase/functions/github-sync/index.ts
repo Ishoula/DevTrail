@@ -1,8 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const Deno = (globalThis as any).Deno;
-
-// ===================== CORS =====================
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -13,25 +10,92 @@ const corsHeaders = {
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: {
-      ...corsHeaders,
-      "Content-Type": "application/json",
-    },
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
 
-// ===================== GITHUB GRAPHQL (contributions) =====================
-async function getContributions(username: string, token: string) {
+function errorBody(message: string, details?: unknown) {
+  return {
+    error: message,
+    details: details instanceof Error ? details.message : details,
+  };
+}
+
+// ===================== GITHUB GRAPHQL =====================
+async function githubGraphQL(query: string, token: string, variables?: any) {
+  const res = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "User-Agent": "DevTrack",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    console.error("GitHub GraphQL HTTP Error:", data);
+    throw new Error(data?.message ?? "GitHub GraphQL request failed");
+  }
+
+  if (data.errors) {
+    console.error("GitHub GraphQL Errors:", data.errors);
+    throw new Error(data.errors.map((error: any) => error.message).join("; "));
+  }
+
+  return data;
+}
+
+// ===================== REPOS =====================
+async function getRepos(username: string, token: string) {
   const query = `
-    query {
-      user(login: "${username}") {
-        contributionsCollection {
-          contributionCalendar {
-            totalContributions
-            weeks {
-              contributionDays {
-                date
-                contributionCount
+    query ($login: String!) {
+      user(login: $login) {
+        repositories(first: 50, ownerAffiliations: OWNER, orderBy: {field: UPDATED_AT, direction: DESC}) {
+          nodes {
+            databaseId
+            name
+            nameWithOwner
+            stargazerCount
+            forkCount
+            updatedAt
+            primaryLanguage {
+              name
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const data = await githubGraphQL(query, token, { login: username });
+
+  return data?.data?.user?.repositories?.nodes ?? [];
+}
+
+// ===================== COMMITS =====================
+async function getCommits(username: string, token: string) {
+  const query = `
+    query ($login: String!) {
+      user(login: $login) {
+        repositories(first: 20, ownerAffiliations: OWNER) {
+          nodes {
+            nameWithOwner
+            defaultBranchRef {
+              target {
+                ... on Commit {
+                  history(first: 30) {
+                    nodes {
+                      oid
+                      message
+                      committedDate
+                      additions
+                      deletions
+                    }
+                  }
+                }
               }
             }
           }
@@ -40,121 +104,25 @@ async function getContributions(username: string, token: string) {
     }
   `;
 
-  const res = await fetch("https://api.github.com/graphql", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ query }),
+  const data = await githubGraphQL(query, token, { login: username });
+
+  const repos = data?.data?.user?.repositories?.nodes ?? [];
+
+  return repos.flatMap((repo: any) => {
+    const commits = repo.defaultBranchRef?.target?.history?.nodes ?? [];
+
+    return commits.map((c: any) => ({
+      sha: c.oid,
+      message: c.message,
+      repository: repo.nameWithOwner,
+      committed_at: c.committedDate,
+      additions: c.additions ?? 0,
+      deletions: c.deletions ?? 0,
+    }));
   });
-
-  const data = await res.json();
-
-  return data?.data?.user?.contributionsCollection?.contributionCalendar;
 }
 
-function formatHeatmap(calendar: any) {
-  return calendar.weeks.flatMap((week: any) =>
-    week.contributionDays.map((day: any) => ({
-      date: day.date,
-      count: day.contributionCount,
-    }))
-  );
-}
-
-function calculateStreak(calendar: any) {
-  const days = calendar.weeks.flatMap((w: any) => w.contributionDays);
-
-  const sorted = [...days].sort(
-    (a: any, b: any) =>
-      new Date(a.date).getTime() - new Date(b.date).getTime()
-  );
-
-  let streak = 0;
-
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    if (sorted[i].contributionCount > 0) streak++;
-    else break;
-  }
-
-  return streak;
-}
-
-// ===================== SESSION LOGIC =====================
-const SESSION_BREAK_MS = 120 * 60 * 1000;
-const INITIAL_BUFFER_MS = 30 * 60 * 1000;
-const FINAL_BUFFER_MS = 10 * 60 * 1000;
-
-interface CommitRow {
-  committed_at: string;
-}
-
-interface CodingSessionRow {
-  user_id: string;
-  started_at: string;
-  ended_at: string;
-  duration_minutes: number;
-  commit_count: number;
-}
-
-function computeSessions(
-  userId: string,
-  commits: CommitRow[]
-): CodingSessionRow[] {
-  if (!commits.length) return [];
-
-  const timestamps = commits
-    .map((c) => new Date(c.committed_at).getTime())
-    .filter((t) => !isNaN(t))
-    .sort((a, b) => a - b);
-
-  if (!timestamps.length) return [];
-
-  const sessions: CodingSessionRow[] = [];
-
-  let start = timestamps[0];
-  let end = timestamps[0];
-  let count = 1;
-
-  for (let i = 1; i < timestamps.length; i++) {
-    const gap = timestamps[i] - timestamps[i - 1];
-
-    if (gap > SESSION_BREAK_MS) {
-      sessions.push(buildSession(userId, start, end, count));
-      start = timestamps[i];
-      count = 1;
-    } else {
-      count++;
-    }
-
-    end = timestamps[i];
-  }
-
-  sessions.push(buildSession(userId, start, end, count));
-
-  return sessions;
-}
-
-function buildSession(
-  userId: string,
-  first: number,
-  last: number,
-  count: number
-): CodingSessionRow {
-  const startedMs = first - INITIAL_BUFFER_MS;
-  const endedMs = last + FINAL_BUFFER_MS;
-
-  return {
-    user_id: userId,
-    started_at: new Date(startedMs).toISOString(),
-    ended_at: new Date(endedMs).toISOString(),
-    duration_minutes: Math.round((endedMs - startedMs) / 60000),
-    commit_count: count,
-  };
-}
-
-// ===================== MAIN FUNCTION =====================
+// ===================== MAIN =====================
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -168,11 +136,8 @@ Deno.serve(async (req: Request) => {
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const SUPABASE_SERVICE_KEY = Deno.env.get(
-      "SUPABASE_SERVICE_ROLE_KEY"
-    )!;
+    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Auth client
     const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -186,15 +151,23 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: "Unauthorized" }, 401);
     }
 
-    const { github_token } = await req.json();
+    let body: { github_token?: string };
+    try {
+      body = await req.json();
+    } catch {
+      return jsonResponse({ error: "Invalid JSON body" }, 400);
+    }
 
+    const { github_token } = body;
     if (!github_token) {
       return jsonResponse({ error: "Missing GitHub token" }, 400);
     }
 
     const userId = user.id;
 
-    // ===================== GET GITHUB USER =====================
+    console.log("Sync started for user:", userId);
+
+    // ===================== GITHUB USER =====================
     const githubUserRes = await fetch("https://api.github.com/user", {
       headers: {
         Authorization: `Bearer ${github_token}`,
@@ -214,157 +187,105 @@ Deno.serve(async (req: Request) => {
 
     const username = githubUser.login;
 
-    // ===================== EVENTS =====================
-    const eventsRes = await fetch(
-      `https://api.github.com/users/${username}/events?per_page=100`,
-      {
-        headers: {
-          Authorization: `Bearer ${github_token}`,
-          "User-Agent": "DevTrack",
-        },
-      }
-    );
-
-    const events = await eventsRes.json();
-    const pushEvents = events.filter((e: any) => e.type === "PushEvent");
-
-    // ===================== COMMITS =====================
-    const commits = pushEvents.flatMap((event: any) => {
-      const commitsArray = event.payload?.commits;
-      if (!Array.isArray(commitsArray)) return [];
-
-      return commitsArray.map((commit: any) => ({
-        user_id: userId,
-        sha: commit.sha,
-        message: commit.message,
-        repository: event.repo?.name || "unknown",
-        committed_at: event.created_at,
-      }));
-    });
-
-    // ===================== REPOS =====================
-    const reposRes = await fetch(
-      `https://api.github.com/users/${username}/repos?per_page=100&sort=updated`,
-      {
-        headers: {
-          Authorization: `Bearer ${github_token}`,
-          "User-Agent": "DevTrack",
-        },
-      }
-    );
-
-    const repos = await reposRes.json();
-
-    const repoRecords = repos.map((repo: any) => ({
-      user_id: userId,
-      repo_id: repo.id,
-      name: repo.name,
-      full_name: repo.full_name,
-      language: repo.language,
-      stars: repo.stargazers_count,
-      forks: repo.forks_count,
-      updated_at: repo.updated_at,
-    }));
-
-    // ===================== CONTRIBUTIONS =====================
-    const contributions = await getContributions(
-      username,
-      github_token
-    );
-
-    const heatmap = formatHeatmap(contributions);
-    const streak = calculateStreak(contributions);
-
-    // ===================== SUPABASE CLIENT =====================
+    // ===================== SUPABASE =====================
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-    // ===================== SAVE COMMITS =====================
-    if (commits.length > 0) {
-      const { error: commitErr } = await supabase
-        .from("commits")
-        .upsert(commits, { onConflict: "sha" });
+    // ===================== FETCH DATA =====================
+    const repos = await getRepos(username, github_token);
+    const commits = await getCommits(username, github_token);
 
-      if (commitErr) {
-        console.error("COMMIT UPSERT ERROR:", commitErr);
-      }
-    }
+    console.log("Repos fetched:", repos.length);
+    console.log("Commits fetched:", commits.length);
 
-    // ===================== SAVE REPOS =====================
+    // ===================== REPOS FORMAT =====================
+    const repoRecords = repos.map((repo: any) => ({
+      repo_id: repo.databaseId, // FIXED (was repo.id)
+      user_id: userId,
+      name: repo.name,
+      full_name: repo.nameWithOwner,
+      language: repo.primaryLanguage?.name ?? null,
+      stars: repo.stargazerCount ?? 0,
+      forks: repo.forkCount ?? 0,
+      updated_at: repo.updatedAt,
+    }));
+
+    // ===================== COMMITS FORMAT =====================
+    const commitRecords = commits.map((c: any) => ({
+      user_id: userId, // FIXED (was missing)
+      sha: c.sha,
+      message: c.message,
+      repository: c.repository,
+      committed_at: c.committed_at,
+      additions: c.additions,
+      deletions: c.deletions,
+    }));
+
+    // ===================== UPSERT REPOS =====================
     if (repoRecords.length > 0) {
-      const { error: repoErr } = await supabase
+      const { error: repoError } = await supabase
         .from("repos")
         .upsert(repoRecords, { onConflict: "repo_id" });
 
-      if (repoErr) {
-        console.error("REPO UPSERT ERROR:", repoErr);
+      if (repoError) {
+        console.error("Repo insert error:", repoError);
+
+        if (repoError.code !== "42P01") {
+          return jsonResponse(
+            errorBody("Failed to sync GitHub repos", repoError),
+            500
+          );
+        }
+
+        console.warn(
+          "Skipping repo persistence because the repos table does not exist."
+        );
       }
     }
 
-    // ===================== SAVE GITHUB STATS =====================
-    await supabase.from("github_stats").upsert(
-      {
-        user_id: userId,
-        github_username: username,
-        streak,
-        total_contributions: contributions.totalContributions,
-        repos_synced: repoRecords.length,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" }
-    );
+    // ===================== UPSERT COMMITS =====================
+    if (commitRecords.length > 0) {
+      const { error: commitError } = await supabase
+        .from("commits")
+        .upsert(commitRecords, { onConflict: "sha" });
 
-    // ===================== SAVE HEATMAP =====================
-    const heatmapRows = heatmap.map((day: any) => ({
-      user_id: userId,
-      contribution_date: day.date,
-      contribution_count: day.count,
-    }));
-
-    if (heatmapRows.length > 0) {
-      await supabase
-        .from("github_heatmap")
-        .upsert(heatmapRows, {
-          onConflict: "user_id,contribution_date",
-        });
-    }
-
-    // ===================== COMPUTE + SAVE SESSIONS =====================
-    let sessions_synced = 0;
-
-    const computedSessions = computeSessions(userId, commits);
-
-    if (computedSessions.length > 0) {
-      const { error: sessionErr } = await supabase
-        .from("coding_sessios")
-        .upsert(computedSessions, {
-          onConflict: "user_id,started_at",
-        });
-
-      if (sessionErr) {
-        console.error("SESSION UPSERT ERROR:", sessionErr);
-      } else {
-        sessions_synced = computedSessions.length;
+      if (commitError) {
+        console.error("Commit insert error:", commitError);
+        return jsonResponse(
+          errorBody("Failed to sync GitHub commits", commitError),
+          500
+        );
       }
     }
 
-    // ===================== RESPONSE =====================
+    // ===================== STATS =====================
+    const { error: statsError } = await supabase
+      .from("github_stats")
+      .upsert(
+        {
+          user_id: userId,
+          github_username: username,
+          repos_synced: repos.length,
+          total_contributions: commits.length,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" }
+      );
+
+    if (statsError) {
+      console.error("Stats error:", statsError);
+      return jsonResponse(errorBody("Failed to update GitHub stats", statsError), 500);
+    }
+
     return jsonResponse({
       success: true,
       github_user: username,
-      streak,
-      total_contributions: contributions.totalContributions,
+      repos_synced: repos.length,
       commits_synced: commits.length,
-      repos_synced: repoRecords.length,
-      sessions_synced,
-      stats: {
-        push_events: pushEvents.length,
-        total_events: events.length,
-      },
     });
   } catch (err) {
     console.error("SYNC ERROR:", err);
     return jsonResponse(
-      { error: "Internal server error", details: String(err) },
+      errorBody("Internal server error", err),
       500
     );
   }

@@ -181,7 +181,7 @@ export default function SettingsPage() {
         });
 
       if (error) {
-        setSyncResult(error.message);
+        setSyncResult(await getFunctionErrorMessage(error));
         setSyncing(false);
         return;
       }

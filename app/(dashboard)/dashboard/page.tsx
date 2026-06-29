@@ -341,7 +341,7 @@ export default function DashboardPage() {
         );
 
       if (error) {
-        setSyncResult(error.message);
+        setSyncResult(await getFunctionErrorMessage(error));
         return;
       }
 
