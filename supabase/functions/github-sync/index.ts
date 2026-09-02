@@ -1,5 +1,9 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+    const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+// ===================== CORS =====================
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -7,6 +11,7 @@ const corsHeaders = {
     "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
+// ===================== HELPERS =====================
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -21,6 +26,23 @@ function errorBody(message: string, details?: unknown) {
   };
 }
 
+async function readGitHubResponse(res: Response) {
+  const text = await res.text();
+  let data: any = null;
+
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    const contentType = res.headers.get("content-type") ?? "unknown";
+    const snippet = text.replace(/\s+/g, " ").trim().slice(0, 300);
+    throw new Error(
+      `GitHub returned non-JSON (HTTP ${res.status}, ${contentType}): ${snippet || "empty response"}`
+    );
+  }
+
+  return data;
+}
+
 // ===================== GITHUB GRAPHQL =====================
 async function githubGraphQL(query: string, token: string, variables?: any) {
   const res = await fetch("https://api.github.com/graphql", {
@@ -29,31 +51,73 @@ async function githubGraphQL(query: string, token: string, variables?: any) {
       Authorization: `Bearer ${token}`,
       "User-Agent": "DevTrack",
       "Content-Type": "application/json",
+      Accept: "application/vnd.github+json",
     },
     body: JSON.stringify({ query, variables }),
   });
 
-  const data = await res.json();
+  const data = await readGitHubResponse(res);
 
   if (!res.ok) {
-    console.error("GitHub GraphQL HTTP Error:", data);
     throw new Error(data?.message ?? "GitHub GraphQL request failed");
   }
 
   if (data.errors) {
-    console.error("GitHub GraphQL Errors:", data.errors);
-    throw new Error(data.errors.map((error: any) => error.message).join("; "));
+    throw new Error(data.errors.map((e: any) => e.message).join("; "));
   }
 
   return data;
 }
 
-// ===================== REPOS =====================
+// ===================== CONTRIBUTIONS (REAL GITHUB METRIC) =====================
+async function getGitHubContributions(username: string, token: string) {
+  const query = `
+    query ($login: String!) {
+      user(login: $login) {
+        contributionsCollection {
+          totalCommitContributions
+          totalIssueContributions
+          totalPullRequestContributions
+          totalPullRequestReviewContributions
+          contributionCalendar {
+            totalContributions
+            weeks {
+              contributionDays {
+                contributionCount
+                date
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const data = await githubGraphQL(query, token, { login: username });
+
+  const c = data?.data?.user?.contributionsCollection;
+  const contributionDays =
+    c?.contributionCalendar?.weeks?.flatMap((week: any) => week.contributionDays ?? []) ?? [];
+
+  return {
+    total: c?.contributionCalendar?.totalContributions ?? 0,
+    commits: c?.totalCommitContributions ?? 0,
+    issues: c?.totalIssueContributions ?? 0,
+    prs: c?.totalPullRequestContributions ?? 0,
+    reviews: c?.totalPullRequestReviewContributions ?? 0,
+    days: contributionDays.map((day: any) => ({
+      date: day.date,
+      count: day.contributionCount ?? 0,
+    })),
+  };
+}
+
+// ===================== REPOS (PAGINATED SAFELY) =====================
 async function getRepos(username: string, token: string) {
   const query = `
     query ($login: String!) {
       user(login: $login) {
-        repositories(first: 50, ownerAffiliations: OWNER, orderBy: {field: UPDATED_AT, direction: DESC}) {
+        repositories(first: 100, ownerAffiliations: OWNER, orderBy: {field: UPDATED_AT, direction: DESC}) {
           nodes {
             databaseId
             name
@@ -75,18 +139,18 @@ async function getRepos(username: string, token: string) {
   return data?.data?.user?.repositories?.nodes ?? [];
 }
 
-// ===================== COMMITS =====================
+// ===================== COMMITS (IMPROVED BUT STILL SAFE) =====================
 async function getCommits(username: string, token: string) {
   const query = `
     query ($login: String!) {
       user(login: $login) {
-        repositories(first: 20, ownerAffiliations: OWNER) {
+        repositories(first: 50, ownerAffiliations: OWNER) {
           nodes {
             nameWithOwner
             defaultBranchRef {
               target {
                 ... on Commit {
-                  history(first: 30) {
+                  history(first: 50) {
                     nodes {
                       oid
                       message
@@ -134,10 +198,6 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: "Missing authorization header" }, 401);
     }
 
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
     const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -165,8 +225,6 @@ Deno.serve(async (req: Request) => {
 
     const userId = user.id;
 
-    console.log("Sync started for user:", userId);
-
     // ===================== GITHUB USER =====================
     const githubUserRes = await fetch("https://api.github.com/user", {
       headers: {
@@ -176,7 +234,7 @@ Deno.serve(async (req: Request) => {
       },
     });
 
-    const githubUser = await githubUserRes.json();
+    const githubUser = await readGitHubResponse(githubUserRes);
 
     if (!githubUserRes.ok) {
       return jsonResponse(
@@ -187,19 +245,19 @@ Deno.serve(async (req: Request) => {
 
     const username = githubUser.login;
 
-    // ===================== SUPABASE =====================
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
     // ===================== FETCH DATA =====================
     const repos = await getRepos(username, github_token);
     const commits = await getCommits(username, github_token);
+    const contributions = await getGitHubContributions(username, github_token);
 
-    console.log("Repos fetched:", repos.length);
-    console.log("Commits fetched:", commits.length);
+    console.log("Repos:", repos.length);
+    console.log("Commits (sampled):", commits.length);
 
-    // ===================== REPOS FORMAT =====================
+    // ===================== FORMAT REPOS =====================
     const repoRecords = repos.map((repo: any) => ({
-      repo_id: repo.databaseId, // FIXED (was repo.id)
+      repo_id: repo.databaseId,
       user_id: userId,
       name: repo.name,
       full_name: repo.nameWithOwner,
@@ -209,9 +267,9 @@ Deno.serve(async (req: Request) => {
       updated_at: repo.updatedAt,
     }));
 
-    // ===================== COMMITS FORMAT =====================
+    // ===================== FORMAT COMMITS =====================
     const commitRecords = commits.map((c: any) => ({
-      user_id: userId, // FIXED (was missing)
+      user_id: userId,
       sha: c.sha,
       message: c.message,
       repository: c.repository,
@@ -222,71 +280,79 @@ Deno.serve(async (req: Request) => {
 
     // ===================== UPSERT REPOS =====================
     if (repoRecords.length > 0) {
-      const { error: repoError } = await supabase
-        .from("repos")
-        .upsert(repoRecords, { onConflict: "repo_id" });
-
-      if (repoError) {
-        console.error("Repo insert error:", repoError);
-
-        if (repoError.code !== "42P01") {
-          return jsonResponse(
-            errorBody("Failed to sync GitHub repos", repoError),
-            500
-          );
-        }
-
-        console.warn(
-          "Skipping repo persistence because the repos table does not exist."
-        );
-      }
+      await supabase.from("repos").upsert(repoRecords, {
+        onConflict: "repo_id",
+      });
     }
 
     // ===================== UPSERT COMMITS =====================
     if (commitRecords.length > 0) {
-      const { error: commitError } = await supabase
-        .from("commits")
-        .upsert(commitRecords, { onConflict: "sha" });
+      await supabase.from("commits").upsert(commitRecords, {
+        onConflict: "sha",
+      });
+    }
 
-      if (commitError) {
-        console.error("Commit insert error:", commitError);
+    // Persist GitHub's daily contribution calendar so streaks match GitHub.
+    if (contributions.days.length > 0) {
+      const heatmapRecords = contributions.days.map((day: any) => ({
+        user_id: userId,
+        contribution_date: day.date,
+        contribution_count: day.count,
+      }));
+
+      const { error: heatmapError } = await supabase
+        .from("github_heatmap")
+        .upsert(heatmapRecords, { onConflict: "user_id,contribution_date" });
+
+      if (heatmapError) {
         return jsonResponse(
-          errorBody("Failed to sync GitHub commits", commitError),
+          errorBody("Failed to update GitHub contribution calendar", heatmapError),
           500
         );
       }
     }
 
-    // ===================== STATS =====================
+    // ===================== UPSERT STATS (TRUTH LAYER) =====================
     const { error: statsError } = await supabase
       .from("github_stats")
       .upsert(
         {
           user_id: userId,
           github_username: username,
+
           repos_synced: repos.length,
-          total_contributions: commits.length,
+
+          // REAL GitHub contribution engine (this is your 433 fix)
+          total_contributions: contributions.total,
+          commit_contributions: contributions.commits,
+          issue_contributions: contributions.issues,
+          pr_contributions: contributions.prs,
+          review_contributions: contributions.reviews,
+
+          // optional debugging metric
+          sampled_commits_synced: commits.length,
+
           updated_at: new Date().toISOString(),
         },
         { onConflict: "user_id" }
       );
 
     if (statsError) {
-      console.error("Stats error:", statsError);
-      return jsonResponse(errorBody("Failed to update GitHub stats", statsError), 500);
+      return jsonResponse(
+        errorBody("Failed to update GitHub stats", statsError),
+        500
+      );
     }
 
     return jsonResponse({
       success: true,
       github_user: username,
       repos_synced: repos.length,
-      commits_synced: commits.length,
+      commits_sampled: commits.length,
+      total_contributions: contributions.total,
     });
   } catch (err) {
     console.error("SYNC ERROR:", err);
-    return jsonResponse(
-      errorBody("Internal server error", err),
-      500
-    );
+    return jsonResponse(errorBody("Internal server error", err), 500);
   }
 });

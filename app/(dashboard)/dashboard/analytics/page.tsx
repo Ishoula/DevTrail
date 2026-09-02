@@ -64,6 +64,44 @@ function formatDuration(minutes: number): string {
   return `${h}h ${m}m`;
 }
 
+function calculateStreaks(
+  contributionDays: { contribution_date: string; contribution_count: number | null }[]
+) {
+  const activeDates = new Set(
+    contributionDays
+      .filter((day) => (day.contribution_count ?? 0) > 0)
+      .map((day) => day.contribution_date)
+  );
+
+  // GitHub's calendar dates are date-only values, so compare them at UTC
+  // midnight rather than allowing the browser timezone to shift a day.
+  const today = new Date().toISOString().slice(0, 10);
+  let currentStreak = 0;
+  const currentDate = new Date(`${today}T00:00:00Z`);
+  while (activeDates.has(currentDate.toISOString().slice(0, 10))) {
+    currentStreak++;
+    currentDate.setUTCDate(currentDate.getUTCDate() - 1);
+  }
+
+  const sortedDates = Array.from(activeDates).sort();
+  let longestStreak = 0;
+  let runningStreak = 0;
+  let previousDate: Date | null = null;
+
+  for (const dateValue of sortedDates) {
+    const date = new Date(`${dateValue}T00:00:00Z`);
+    const isConsecutive =
+      previousDate !== null &&
+      date.getTime() - previousDate.getTime() === 24 * 60 * 60 * 1000;
+
+    runningStreak = isConsecutive ? runningStreak + 1 : 1;
+    longestStreak = Math.max(longestStreak, runningStreak);
+    previousDate = date;
+  }
+
+  return { currentStreak, longestStreak };
+}
+
 export default function AnalyticsPage() {
   const { user } = useAuth();
   const [data, setData] = useState<AnalyticsData | null>(null);
@@ -160,36 +198,8 @@ export default function AnalyticsPage() {
         .sort((a, b) => b.count - a.count)
         .slice(0, 8);
 
-      // ── Streaks ──────────────────────────────────────────────────────────
-      const commitDates = Array.from(
-        new Set(commits.map((c) => new Date(c.committed_at).toDateString()))
-      ).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-
-      let currentStreak = 0;
-      for (let i = 0; i < commitDates.length; i++) {
-        const expected = new Date(now);
-        expected.setDate(now.getDate() - i);
-        if (commitDates[i] === expected.toDateString()) {
-          currentStreak++;
-        } else {
-          break;
-        }
-      }
-
-      let longestStreak = 0;
-      let tempStreak    = 1;
-      for (let i = 1; i < commitDates.length; i++) {
-        const prev     = new Date(commitDates[i - 1]);
-        const curr     = new Date(commitDates[i]);
-        const diffDays = Math.round((prev.getTime() - curr.getTime()) / (1000 * 60 * 60 * 24));
-        if (diffDays === 1) {
-          tempStreak++;
-          longestStreak = Math.max(longestStreak, tempStreak);
-        } else {
-          tempStreak = 1;
-        }
-      }
-      longestStreak = Math.max(longestStreak, currentStreak, commitDates.length > 0 ? 1 : 0);
+      // ── Streaks from GitHub's contribution calendar ─────────────────────
+      const { currentStreak, longestStreak } = calculateStreaks(contributionDays);
 
       // ── Heatmap (day-of-week × hour-of-day) ─────────────────────────────
       const heatmapData: { day: number; hour: number; value: number }[] = [];
@@ -268,6 +278,32 @@ export default function AnalyticsPage() {
         <h1 className="text-2xl font-bold">Analytics</h1>
         <p className="text-muted-foreground">Your productivity insights</p>
       </div>
+
+      {/* ── Streak history ──────────────────────────────────────────────── */}
+      <Card className="border-border/50">
+        <CardHeader>
+          <CardTitle className="text-base">Streak History</CardTitle>
+          <CardDescription>Longest streak: {data.longestStreak} days</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="text-center">
+              <p className="text-3xl font-bold text-orange-500">{data.currentStreak}</p>
+              <p className="text-xs text-muted-foreground">Current</p>
+            </div>
+            <div className="h-12 w-px bg-border" />
+            <div className="text-center">
+              <p className="text-3xl font-bold">{data.longestStreak}</p>
+              <p className="text-xs text-muted-foreground">Longest</p>
+            </div>
+            <div className="h-12 w-px bg-border" />
+            <div className="text-center">
+              <p className="text-3xl font-bold">{data.avgDailyContributions}</p>
+              <p className="text-xs text-muted-foreground">Avg/Day</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* ── Stat cards ─────────────────────────────────────────────────── */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -441,32 +477,6 @@ export default function AnalyticsPage() {
           </CardContent>
         </Card>
       </div>
-
-      {/* ── Streak history ──────────────────────────────────────────────── */}
-      <Card className="border-border/50">
-        <CardHeader>
-          <CardTitle className="text-base">Streak History</CardTitle>
-          <CardDescription>Longest streak: {data.longestStreak} days</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="text-center">
-              <p className="text-3xl font-bold text-orange-500">{data.currentStreak}</p>
-              <p className="text-xs text-muted-foreground">Current</p>
-            </div>
-            <div className="h-12 w-px bg-border" />
-            <div className="text-center">
-              <p className="text-3xl font-bold">{data.longestStreak}</p>
-              <p className="text-xs text-muted-foreground">Longest</p>
-            </div>
-            <div className="h-12 w-px bg-border" />
-            <div className="text-center">
-              <p className="text-3xl font-bold">{data.avgDailyContributions}</p>
-              <p className="text-xs text-muted-foreground">Avg/Day</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* ── Session details ─────────────────────────────────────────────── */}
       <Card className="border-border/50">

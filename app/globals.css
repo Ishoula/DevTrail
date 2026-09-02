@@ -29,6 +29,15 @@
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
     --radius: 0.625rem;
+    /* Skeleton colors */
+    --skeleton-base: hsl(var(--secondary) / 0.2);
+    --skeleton-highlight: hsl(var(--primary) / 0.3);
+
+    /* Dark mode overrides */
+    @media (prefers-color-scheme: dark) {
+      --skeleton-base: hsl(var(--secondary) / 0.3);
+      --skeleton-highlight: hsl(var(--primary) / 0.4);
+    }
     --success: 142 76% 36%;
     --success-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
@@ -143,5 +152,22 @@
   .animate-drift-3 {
     animation: drift-3 8s infinite ease-in-out;
   }
+}
+
+/* Shimmer animation */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Apply shimmer to skeleton base */
+.bg-skeleton-base {
+  background: linear-gradient(90deg, var(--skeleton-base) 0%, var(--skeleton-highlight) 50%, var(--skeleton-base) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite ease-in-out;
 }
 
