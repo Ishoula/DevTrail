@@ -279,32 +279,6 @@ export default function AnalyticsPage() {
         <p className="text-muted-foreground">Your productivity insights</p>
       </div>
 
-      {/* ── Streak history ──────────────────────────────────────────────── */}
-      <Card className="border-border/50">
-        <CardHeader>
-          <CardTitle className="text-base">Streak History</CardTitle>
-          <CardDescription>Longest streak: {data.longestStreak} days</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="text-center">
-              <p className="text-3xl font-bold text-orange-500">{data.currentStreak}</p>
-              <p className="text-xs text-muted-foreground">Current</p>
-            </div>
-            <div className="h-12 w-px bg-border" />
-            <div className="text-center">
-              <p className="text-3xl font-bold">{data.longestStreak}</p>
-              <p className="text-xs text-muted-foreground">Longest</p>
-            </div>
-            <div className="h-12 w-px bg-border" />
-            <div className="text-center">
-              <p className="text-3xl font-bold">{data.avgDailyContributions}</p>
-              <p className="text-xs text-muted-foreground">Avg/Day</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* ── Stat cards ─────────────────────────────────────────────────── */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="border-border/50">
@@ -337,15 +311,24 @@ export default function AnalyticsPage() {
 
         <Card className="border-border/50">
           <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center justify-between">
+            <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm text-muted-foreground">Current Streak</p>
                 <p className="mt-1 text-2xl font-bold sm:text-3xl">
                   {data.currentStreak}{' '}
                   <span className="text-base font-normal text-muted-foreground">days</span>
                 </p>
+                <div className="mt-3 flex items-center gap-3 text-xs">
+                  <span className="text-muted-foreground">
+                    Longest <span className="font-semibold text-foreground">{data.longestStreak}d</span>
+                  </span>
+                  <span className="h-4 w-px bg-border" />
+                  <span className="text-muted-foreground">
+                    Avg/Day <span className="font-semibold text-foreground">{data.avgDailyContributions}</span>
+                  </span>
+                </div>
               </div>
-              <div className="h-12 w-12 rounded-lg bg-orange-500/10 flex items-center justify-center">
+              <div className="h-12 w-12 shrink-0 rounded-lg bg-orange-500/10 flex items-center justify-center">
                 <Flame className="h-6 w-6 text-orange-500" />
               </div>
             </div>
